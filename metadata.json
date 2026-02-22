@@ -1,0 +1,5 @@
+{
+  "name": "Shadow Watcher",
+  "description": "An atmospheric 3D survival horror game built with Three.js. Defend the generator, manage your flashlight battery, and uncover the mystery of the Shadow Watchers.",
+  "requestFramePermissions": []
+}
