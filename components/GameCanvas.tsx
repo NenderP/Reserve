@@ -2,11 +2,11 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { GameEngine } from '../services/GameEngine';
-import { GamePhase, SaveData } from '../types';
+import { GamePhase, SaveData, FlashlightMode } from '../types';
 
 interface GameCanvasProps {
   loadingManager: THREE.LoadingManager;
-  onStatsUpdate: (bat: number, hp: number, wave: number, credits: number, genDisabled: boolean, restartProgress: number, totalKills: number, killsByType: Record<string, number>, ammo: number, stamina: number, overcharge: number) => void;
+  onStatsUpdate: (bat: number, hp: number, wave: number, credits: number, genDisabled: boolean, restartProgress: number, totalKills: number, killsByType: Record<string, number>, ammo: number, stamina: number, overcharge: number, dash: number, hitMarker: number, isAimingEnemy: boolean, isBloodMoon: boolean, nearestDist: number | null, fMode: FlashlightMode) => void;
   onPhaseChange: (phase: GamePhase) => void;
   onInteract: (target: string) => void;
   onHover: (isHovering: boolean, text: string) => void;
@@ -15,9 +15,9 @@ interface GameCanvasProps {
   initialData?: SaveData | null;
 }
 
-const GameCanvas: React.FC<GameCanvasProps> = ({ 
+const GameCanvas = ({ 
     loadingManager, onStatsUpdate, onPhaseChange, onInteract, onHover, onDeathSequenceStart, gameEngineRef, initialData 
-}) => {
+}: GameCanvasProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

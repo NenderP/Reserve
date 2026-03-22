@@ -38,6 +38,13 @@
         0% { bottom: 100%; }
         100% { bottom: -100px; }
       }
+      @keyframes hitmarker {
+        0% { transform: translate(-50%, -50%) scale(1.5); opacity: 1; }
+        100% { transform: translate(-50%, -50%) scale(1.0); opacity: 0; }
+      }
+      .hitmarker-anim {
+        animation: hitmarker 0.2s ease-out forwards;
+      }
     </style>
   <script type="importmap">
 {
@@ -52,8 +59,10 @@
   }
 }
 </script>
+<link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>
-  </body>
+  <script type="module" src="/index.tsx"></script>
+</body>
 </html>

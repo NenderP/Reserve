@@ -8,7 +8,8 @@ import MainMenu from './components/MainMenu';
 import LoadingScreen from './components/LoadingScreen';
 import GameOverScreen from './components/GameOverScreen';
 import Jumpscare from './components/Jumpscare';
-import { GamePhase, SaveData, Upgrade } from './types';
+import { TextureGenerator } from './components/TextureGenerator';
+import { GamePhase, SaveData, Upgrade, FlashlightMode } from './types';
 import { GameEngine } from './services/GameEngine';
 import { SaveService } from './services/SaveService';
 import { INITIAL_UPGRADES } from './constants';
@@ -27,9 +28,17 @@ function App() {
   const [isGenDisabled, setIsGenDisabled] = useState(false);
   const [restartProgress, setRestartProgress] = useState(0);
   const [flares, setFlares] = useState(0); 
+  const [mines, setMines] = useState(0);
   const [ammo, setAmmo] = useState(200);
   const [stamina, setStamina] = useState(100);
   const [overchargeCooldown, setOverchargeCooldown] = useState(0);
+  const [dashCooldown, setDashCooldown] = useState(0);
+  const [hitMarkerTrigger, setHitMarkerTrigger] = useState(0);
+  const [isAimingEnemy, setIsAimingEnemy] = useState(false);
+  const [isBloodMoon, setIsBloodMoon] = useState(false);
+  const [nearestEnemyDistance, setNearestEnemyDistance] = useState<number | null>(null);
+  const [flashlightMode, setFlashlightMode] = useState<FlashlightMode>(FlashlightMode.NORMAL);
+  const prevKillsRef = useRef(0);
   
   // Save System
   const [hasSave, setHasSave] = useState(false);
@@ -38,6 +47,7 @@ function App() {
   // Game Over Logic
   const [showJumpscare, setShowJumpscare] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
+  const [isTextureGenOpen, setIsTextureGenOpen] = useState(false);
 
   // Loading State
   const [isLoading, setIsLoading] = useState(true);
@@ -45,6 +55,22 @@ function App() {
   const loadingManager = useRef(new THREE.LoadingManager());
   
   const gameEngineRef = useRef<GameEngine | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 't' || e.key === 'T') {
+        if (phase !== GamePhase.MENU && !isGameOver && !showJumpscare) {
+            setIsTextureGenOpen(prev => !prev);
+            // Unlock pointer when opening UI
+            if (!isTextureGenOpen) {
+                document.exitPointerLock();
+            }
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [phase, isGameOver, showJumpscare, isTextureGenOpen]);
 
   // Init Check
   useEffect(() => {
@@ -78,6 +104,8 @@ function App() {
               generatorHp: hp,
               battery: battery,
               flares: flares, 
+              mines: mines,
+              turretAmmo: ammo,
               upgrades: minimalUpgrades,
               date: new Date().toLocaleDateString()
           };
@@ -98,7 +126,13 @@ function App() {
       kByType: Record<string, number>,
       turretAmmo: number,
       newStamina: number,
-      overcharge: number
+      overcharge: number,
+      dash: number,
+      hitMarker?: number,
+      aimingEnemy?: boolean,
+      bloodMoon?: boolean,
+      nearestDist?: number | null,
+      fMode?: FlashlightMode
   ) => {
     setBattery(newBat);
     setHp(newHp);
@@ -111,9 +145,22 @@ function App() {
     setAmmo(turretAmmo);
     setStamina(newStamina);
     setOverchargeCooldown(overcharge);
+    setDashCooldown(dash);
+    if (aimingEnemy !== undefined) setIsAimingEnemy(aimingEnemy);
+    if (bloodMoon !== undefined) setIsBloodMoon(bloodMoon);
+    if (nearestDist !== undefined) setNearestEnemyDistance(nearestDist);
+    if (fMode !== undefined) setFlashlightMode(fMode);
+    
+    if (hitMarker && hitMarker > hitMarkerTrigger) {
+        setHitMarkerTrigger(hitMarker);
+    } else if (kills > prevKillsRef.current) {
+        setHitMarkerTrigger(Date.now());
+        prevKillsRef.current = kills;
+    }
     
     if (gameEngineRef.current) {
         setFlares((gameEngineRef.current as any).flaresCount); 
+        setMines((gameEngineRef.current as any).minesCount);
     }
   }, []);
 
@@ -173,6 +220,8 @@ function App() {
           setTotalKills(data.totalKills);
           setKillsByType(data.killsByType || {});
           setFlares(data.flares || 0);
+          setMines(data.mines || 0);
+          setAmmo(data.turretAmmo || 0);
           
           setInitialSaveData(data);
           setPhase(GamePhase.DAY);
@@ -199,7 +248,7 @@ function App() {
               if (idx === -1) return prev;
               const newUps = [...prev];
               
-              if (id === 'flare_pack' || id === 'turret_ammo') {
+              if (id === 'flare_pack' || id === 'turret_ammo' || id === 'mine_pack') {
                   newUps[idx] = {
                       ...newUps[idx],
                       level: newUps[idx].level + 1
@@ -215,6 +264,8 @@ function App() {
           });
           
           setFlares((gameEngineRef.current as any).flaresCount);
+          setMines((gameEngineRef.current as any).minesCount);
+          setAmmo((gameEngineRef.current as any).turretAmmo);
       }
   };
 
@@ -279,8 +330,18 @@ function App() {
             isGenDisabled={isGenDisabled}
             restartProgress={restartProgress}
             flares={flares}
+            mines={mines}
+            ammo={ammo}
+            hasTurret={(upgrades.find(u => u.id === 'turret_build')?.level || 0) > 0}
             stamina={stamina}
             overchargeCooldown={overchargeCooldown}
+            dashCooldown={dashCooldown}
+            hitMarkerTrigger={hitMarkerTrigger}
+            credits={credits}
+            isAimingEnemy={isAimingEnemy}
+            isBloodMoon={isBloodMoon}
+            nearestEnemyDistance={nearestEnemyDistance}
+            flashlightMode={flashlightMode}
           />
 
           <ComputerTerminal 
@@ -295,6 +356,18 @@ function App() {
             onUpgrade={handleUpgrade}
             upgrades={upgrades}
           />
+
+          {isTextureGenOpen && (
+              <TextureGenerator 
+                  onClose={() => setIsTextureGenOpen(false)}
+                  onApplyTexture={(target, base64) => {
+                      if (gameEngineRef.current) {
+                          gameEngineRef.current.applyCustomTexture(target, base64);
+                      }
+                      setIsTextureGenOpen(false);
+                  }}
+              />
+          )}
         </>
       )}
     </div>

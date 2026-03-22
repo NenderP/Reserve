@@ -10,7 +10,7 @@ interface MainMenuProps {
   hasSave: boolean;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ phase, onStartGame, onContinueGame, hasSave }) => {
+const MainMenu = ({ phase, onStartGame, onContinueGame, hasSave }: MainMenuProps) => {
   const [showLogs, setShowLogs] = useState(false);
 
   if (phase !== GamePhase.MENU) return null;

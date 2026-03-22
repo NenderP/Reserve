@@ -17,9 +17,9 @@ interface ComputerTerminalProps {
   upgrades: Upgrade[]; // Receive upgrades from parent
 }
 
-const ComputerTerminal: React.FC<ComputerTerminalProps> = ({ 
+const ComputerTerminal = ({ 
     phase, wave, credits, totalKills, killsByType, onStartNextWave, onClose, onUpgrade, isOpen, upgrades
-}) => {
+}: ComputerTerminalProps) => {
   const [activeTab, setActiveTab] = useState<'status' | 'logs' | 'bestiary' | 'shop' | 'defense'>('status');
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -148,9 +148,9 @@ const ComputerTerminal: React.FC<ComputerTerminalProps> = ({
                                     `}
                                 >
                                     {unlocked ? (
-                                        <span>> {lore.title}</span>
+                                        <span>{'>'} {lore.title}</span>
                                     ) : (
-                                        <span>> [ДАННЫЕ ЗАШИФРОВАНЫ]</span>
+                                        <span>{'>'} [ДАННЫЕ ЗАШИФРОВАНЫ]</span>
                                     )}
                                 </div>
                             );
@@ -228,7 +228,13 @@ const ComputerTerminal: React.FC<ComputerTerminalProps> = ({
             {activeTab === 'shop' && (
                 <div>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {upgrades.map(up => (
+                        {upgrades.filter(up => {
+                            if (up.id === 'turret_ammo') {
+                                const turretBuild = upgrades.find(u => u.id === 'turret_build');
+                                return turretBuild && turretBuild.level > 0;
+                            }
+                            return true;
+                        }).map(up => (
                             <div key={up.id} className="border border-[#33ff33]/50 p-4 hover:bg-[#33ff33]/10 transition-colors relative group">
                                 <div className="flex justify-between mb-2">
                                     <span className="font-bold text-white group-hover:text-[#33ff33] transition-colors">{up.name}</span>

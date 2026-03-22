@@ -97,12 +97,57 @@ export const INITIAL_UPGRADES = [
     effect: (val: number) => val
   },
   {
-    id: 'turret_ammo',
-    name: 'Sentry Ammo Box',
-    description: 'Коробка патронов для автоматической турели (100 шт).',
+    id: 'mine_pack',
+    name: 'Proximity Mine (+1)',
+    description: 'Умная мина. Срабатывает при приближении врага. Нажмите [V] для установки.',
     cost: 150,
     level: 0,
     maxLevel: 99,
+    effect: (val: number) => val
+  },
+  {
+    id: 'turret_build',
+    name: 'Sentry Turret System',
+    description: 'Установка автоматической турели. Уровень 1: крайне слабая и медленная. Улучшайте для повышения урона и скорости.',
+    cost: 400, // Increased cost
+    level: 0,
+    maxLevel: 5,
+    effect: (val: number) => val
+  },
+  {
+    id: 'turret_ammo',
+    name: 'Sentry Ammo Box',
+    description: 'Коробка патронов для автоматической турели (100 шт).',
+    cost: 100, // Reduced cost
+    level: 0,
+    maxLevel: 99,
+    effect: (val: number) => val
+  },
+  {
+    id: 'dash_boots',
+    name: 'Kinetic Boosters',
+    description: 'Позволяет совершать быстрый рывок на [Space]. Расходует много выносливости.',
+    cost: 250,
+    level: 0,
+    maxLevel: 3,
+    effect: (val: number) => val
+  },
+  {
+    id: 'adrenaline',
+    name: 'Adrenaline Shot',
+    description: 'Мгновенно восстанавливает выносливость и увеличивает ее регенерацию.',
+    cost: 180,
+    level: 0,
+    maxLevel: 3,
+    effect: (val: number) => val
+  },
+  {
+    id: 'advanced_optics',
+    name: 'Advanced Optics',
+    description: 'Улучшенная фокусировка луча. Увеличивает дальность и урон фонаря.',
+    cost: 300,
+    level: 0,
+    maxLevel: 3,
     effect: (val: number) => val
   }
 ];

@@ -13,6 +13,7 @@ export class SoundManager {
   private flashlightWhine: THREE.Audio | null = null;
   private rainAmbience: THREE.Audio | null = null;
   private breathingSound: THREE.Audio | null = null;
+  private heartbeatSound: THREE.Audio | null = null;
   
   // Interactables
   private fanSound: THREE.PositionalAudio | null = null;
@@ -99,7 +100,25 @@ export class SoundManager {
           return noise * (phase * 0.5 + 0.5) * 0.5;
       }));
 
-      // 9. Fan Whir
+      // 8.5 Heartbeat
+      this.buffers.set('heartbeat', createBuffer(1.0, (t) => {
+          const thump1 = Math.exp(-t * 20) * Math.sin(t * 40 * Math.PI);
+          const thump2 = t > 0.3 ? Math.exp(-(t - 0.3) * 20) * Math.sin((t - 0.3) * 40 * Math.PI) : 0;
+          return (thump1 + thump2) * 0.8;
+      }));
+
+      // 9. Hit Marker (Sharp tick)
+      this.buffers.set('hit_marker', createBuffer(0.05, (t) => {
+          return (Math.random() - 0.5) * Math.exp(-t * 200) * 0.5;
+      }));
+
+      // 10. Turret Shoot (Pew)
+      this.buffers.set('turret_shoot', createBuffer(0.1, (t) => {
+          const freq = 800 * Math.exp(-t * 30);
+          return Math.sin(t * freq * Math.PI * 2) * Math.exp(-t * 20) * 0.4;
+      }));
+
+      // 11. Fan Whir
       this.buffers.set('fan', createBuffer(1.0, (t) => {
           const noise = Math.random() * 0.1;
           const hum = Math.sin(t * 200 * Math.PI) * 0.1;
@@ -203,6 +222,31 @@ export class SoundManager {
       this.breathingSound.setPlaybackRate(currentRate + (targetRate - currentRate) * 0.1);
   }
 
+  public updateHeartbeat(stress: number) {
+      if (!this.isAudioResumed) return;
+      if (!this.heartbeatSound) {
+          this.heartbeatSound = new THREE.Audio(this.listener);
+          this.heartbeatSound.setBuffer(this.buffers.get('heartbeat')!);
+          this.heartbeatSound.setLoop(true);
+          this.heartbeatSound.setVolume(0);
+          this.heartbeatSound.play();
+      }
+      
+      if (stress > 0.3) {
+          const factor = (stress - 0.3) / 0.7; // 0 to 1
+          const targetVol = factor * 1.0;
+          const current = this.heartbeatSound.getVolume();
+          this.heartbeatSound.setVolume(current + (targetVol - current) * 0.1);
+          
+          const targetRate = 1.0 + factor * 0.5;
+          const currentRate = this.heartbeatSound.playbackRate;
+          this.heartbeatSound.setPlaybackRate(currentRate + (targetRate - currentRate) * 0.1);
+      } else {
+          const current = this.heartbeatSound.getVolume();
+          this.heartbeatSound.setVolume(current * 0.9);
+      }
+  }
+
   // FIX: Add overcharge sound player
   public playOverchargeStart() {
       if (!this.buffers.has('overcharge_start')) return;
@@ -255,6 +299,22 @@ export class SoundManager {
               this.rainAmbience = null;
           }
       }
+  }
+
+  public playHitMarker() {
+      if (!this.buffers.has('hit_marker')) return;
+      const sound = new THREE.Audio(this.listener);
+      sound.setBuffer(this.buffers.get('hit_marker')!);
+      sound.setVolume(0.8);
+      sound.play();
+  }
+
+  public playTurretShoot() {
+      if (!this.buffers.has('turret_shoot')) return;
+      const sound = new THREE.Audio(this.listener);
+      sound.setBuffer(this.buffers.get('turret_shoot')!);
+      sound.setVolume(0.4);
+      sound.play();
   }
 
   public createFlareSound(mesh: THREE.Object3D): THREE.PositionalAudio | null {

@@ -1,4 +1,10 @@
 
+export enum FlashlightMode {
+  NORMAL = 'NORMAL',
+  UV = 'UV',
+  STROBE = 'STROBE'
+}
+
 export enum GamePhase {
   MENU = 'MENU',
   NIGHT = 'NIGHT',
@@ -13,7 +19,8 @@ export enum EnemyType {
   TANK = 'Tank',
   SPLITTER = 'Splitter',
   GLITCHER = 'Glitcher',
-  DRAINER = 'Drainer'
+  DRAINER = 'Drainer',
+  PHANTOM = 'Phantom'
 }
 
 export interface UnlockCondition {
@@ -59,6 +66,7 @@ export interface GameState {
   enemiesKilled: number;
   totalKills: number; // Persistent across waves
   flares: number; // ADDED
+  mines: number; // ADDED
 }
 
 export interface ScoreEntry {
@@ -75,6 +83,8 @@ export interface SaveData {
   generatorHp: number;
   battery: number;
   flares: number; // ADDED
+  mines: number; // ADDED
+  turretAmmo: number;
   upgrades: { id: string; level: number }[]; // Minimal data to reconstruct upgrades
   date: string;
 }

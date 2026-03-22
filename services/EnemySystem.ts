@@ -116,6 +116,8 @@ export abstract class Enemy {
   public isDying: boolean = false; 
   public id: string;
   public age: number = 0; 
+  private flankAngle: number = (Math.random() - 0.5) * Math.PI * 0.5;
+  private flankIntensity: number = Math.random() * 0.5;
   
   protected hitFlashTimer: number = 0;
   private decals: THREE.Mesh[] = [];
@@ -160,6 +162,7 @@ export abstract class Enemy {
     
     this.applyCustomShader(material);
     this.mesh = new THREE.Mesh(geometry, material);
+    this.mesh.userData = { isEnemy: true };
     this.mesh.castShadow = true;
     this.mesh.position.y = 1;
     
@@ -290,6 +293,10 @@ export abstract class Enemy {
   update(delta: number, target: THREE.Vector3): string | void | null {
     if (this.isDead) return;
     
+    if (this.hitFlashTimer > 0) {
+        this.hitFlashTimer -= delta;
+    }
+
     this.age += delta;
     this.shaderUniforms.uTime.value += delta;
     this.shaderUniforms.uHpRatio.value = this.hp / this.maxHp;
@@ -313,7 +320,12 @@ export abstract class Enemy {
     const stopDist = this.type === EnemyType.DRAINER ? 8.0 : 1.5;
 
     if (distToTarget > stopDist) {
-        const direction = new THREE.Vector3().subVectors(target, this.mesh.position).normalize();
+        const toTarget = new THREE.Vector3().subVectors(target, this.mesh.position).normalize();
+        
+        // Flanking logic: add a perpendicular component to the direction
+        const flankDir = new THREE.Vector3(-toTarget.z, 0, toTarget.x);
+        const direction = toTarget.add(flankDir.multiplyScalar(Math.sin(this.age * 0.5) * this.flankIntensity)).normalize();
+        
         this.mesh.position.add(direction.multiplyScalar(this.speed * delta));
         
         // Tilt forward when running
@@ -335,13 +347,25 @@ export abstract class Enemy {
       this.shaderUniforms.uEdgeColor.value.setHex(0xffffaa);
   }
 
-  takeDamage(amount: number, point?: THREE.Vector3, normal?: THREE.Vector3, decalTex?: THREE.Texture) {
-    if (this.isDying || this.isDead) return;
-    this.hp -= amount;
-    if (point && normal && decalTex && Math.random() > 0.5) {
+  takeDamage(amount: number, point?: THREE.Vector3, normal?: THREE.Vector3, decalTex?: THREE.Texture): boolean {
+    if (this.isDying || this.isDead) return false;
+    
+    this.hitFlashTimer = 0.5; // Flash for 0.5 seconds
+
+    // Critical hit mechanic: 20% chance for double damage
+    const isCritical = Math.random() < 0.2;
+    const finalDamage = isCritical ? amount * 2 : amount;
+    
+    this.hp -= finalDamage;
+    
+    if (point && normal && decalTex && (Math.random() > 0.5 || isCritical)) {
         this.addBurnDecal(point, normal, decalTex);
     }
-    if (this.hp <= 0) this.isDying = true;
+    if (this.hp <= 0) {
+        this.isDying = true;
+        return true;
+    }
+    return false;
   }
 }
 
@@ -383,6 +407,34 @@ export class DrainerEnemy extends Enemy {
       super.update(delta, target);
       if(this.stunTimer > 0) return;
       this.mesh.position.y = 3.0 + Math.sin(this.age * 2) * 0.5;
+  }
+}
+
+export class PhantomEnemy extends Enemy {
+  constructor() {
+    super(EnemyType.PHANTOM, 60, 4.0, 0x000000, 1.0); 
+    const mat = this.mesh.material as THREE.MeshStandardMaterial;
+    mat.transparent = true;
+    mat.opacity = 0.05;
+    mat.emissive.setHex(0x110011);
+    mat.emissiveIntensity = 0.0;
+  }
+
+  update(delta: number, target: THREE.Vector3) {
+      super.update(delta, target);
+      if(this.stunTimer > 0) return;
+      
+      const mat = this.mesh.material as THREE.MeshStandardMaterial;
+      // If it's taking damage, it means it's illuminated
+      if (this.hitFlashTimer > 0) {
+          mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0.8, delta * 10);
+          mat.emissiveIntensity = THREE.MathUtils.lerp(mat.emissiveIntensity, 1.0, delta * 10);
+          this.speed = 1.0; 
+      } else {
+          mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0.05, delta * 2);
+          mat.emissiveIntensity = THREE.MathUtils.lerp(mat.emissiveIntensity, 0.0, delta * 2);
+          this.speed = 4.5; 
+      }
   }
 }
 
@@ -434,8 +486,8 @@ export class ForestHeartBoss extends Enemy {
         (this.mesh.material as THREE.MeshStandardMaterial).emissive.setHex(0x00ff00);
     }
     
-    takeDamage(amount: number, point?: THREE.Vector3, normal?: THREE.Vector3, decalTex?: THREE.Texture) {
-        super.takeDamage(amount * 0.1, point, normal, decalTex); // High armor
+    takeDamage(amount: number, point?: THREE.Vector3, normal?: THREE.Vector3, decalTex?: THREE.Texture): boolean {
+        return super.takeDamage(amount * 0.1, point, normal, decalTex); // High armor
     }
     
     update(delta: number, target: THREE.Vector3): any {
