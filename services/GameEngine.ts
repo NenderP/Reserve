@@ -9,18 +9,18 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { FilmPass } from 'three/examples/jsm/postprocessing/FilmPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { FlashlightController } from './FlashlightController';
-import { Enemy, NormalEnemy, FastEnemy, TankEnemy, GlitcherEnemy, DrainerEnemy, PhantomEnemy, ShriekerBoss, ForestHeartBoss } from './EnemySystem';
+import { Enemy, NormalEnemy, FastEnemy, TankEnemy, GlitcherEnemy, DrainerEnemy, PhantomEnemy, ShriekerBoss, ForestHeartBoss, SpitterEnemy, LeviathanBoss } from './EnemySystem';
 import { SoundManager } from './SoundManager';
 import { COLORS, GAME_CONFIG } from '../constants';
 import { GamePhase, EnemyType, SaveData, FlashlightMode } from '../types';
-import { VignetteShader, HorrorColorGradeShader, injectWindShader, ChromaticAberrationShader } from './Shaders';
+import { HorrorColorGradeShader, injectWindShader, ChromaticAberrationShader } from './Shaders';
 import gsap from 'gsap';
 
 // --- Weather Systems ---
 
 class RainSystem {
     private particles: THREE.Points;
-    private count: number = 2000; // STRICT LIMIT PER USER REQUEST
+    private count: number = 400; // optimized further from 800 per user request
 
     constructor(scene: THREE.Scene) {
         const geo = new THREE.BufferGeometry();
@@ -154,11 +154,10 @@ class Flare {
         this.mesh.add(core);
 
         this.light = new THREE.PointLight(COLORS.FLARE, 8, GAME_CONFIG.FLARE_RADIUS * 2.0);
-        this.light.castShadow = true;
-        this.light.shadow.bias = -0.0001;
+        this.light.castShadow = false; // Turn off shadows for flares to save massive performance
         this.mesh.add(this.light);
 
-        const pCount = 40;
+        const pCount = 20; // Reduced particles
         const pGeo = new THREE.BufferGeometry();
         const pPos = new Float32Array(pCount * 3);
         for(let i=0; i<pCount; i++) pPos[i] = 0;
@@ -239,8 +238,7 @@ class LootDrop {
         const crystal = new THREE.Mesh(geo, mat);
         this.mesh.add(crystal);
         
-        const light = new THREE.PointLight(color, 1, 3);
-        this.mesh.add(light);
+        // Removed PointLight to save performance. Emissive material on crystal is enough.
     }
 
     public update(delta: number) {
@@ -313,7 +311,7 @@ class Mine {
 
 // --- Procedural Texture Utils ---
 export class TextureUtils {
-    static createNoiseCanvas(width: number, height: number, type: 'wood' | 'concrete' | 'monitor' | 'metal' | 'grass' | 'flesh' | 'leaf' | 'plastic' | 'ceramic'): HTMLCanvasElement {
+    static createNoiseCanvas(width: number, height: number, type: 'wood' | 'concrete' | 'monitor' | 'metal' | 'grass' | 'flesh' | 'leaf' | 'plastic' | 'ceramic' | 'rust' | 'dirty-concrete'): HTMLCanvasElement {
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
@@ -335,6 +333,10 @@ export class TextureUtils {
             } else if (type === 'metal') {
                 val = Math.random() * 50 + 80;
                 if (Math.random() > 0.99) val = 200;
+            } else if (type === 'rust') {
+                val = Math.random() * 60 + 40;
+            } else if (type === 'dirty-concrete') {
+                val = Math.random() * 80 + 30;
             } else if (type === 'monitor') {
                  val = 0; 
             } else if (type === 'grass' || type === 'leaf') {
@@ -356,6 +358,26 @@ export class TextureUtils {
             ctx.globalCompositeOperation = 'multiply';
             ctx.fillStyle = '#654321';
             ctx.fillRect(0,0,width,height);
+        } else if (type === 'rust') {
+            ctx.globalCompositeOperation = 'multiply';
+            ctx.fillStyle = '#8b4513';
+            ctx.fillRect(0,0,width,height);
+            for(let i=0; i<30; i++) {
+                ctx.fillStyle = `rgba(165, 42, 42, ${Math.random() * 0.4})`;
+                ctx.beginPath();
+                ctx.arc(Math.random()*width, Math.random()*height, Math.random()*20, 0, Math.PI*2);
+                ctx.fill();
+            }
+        } else if (type === 'dirty-concrete') {
+            ctx.globalCompositeOperation = 'multiply';
+            ctx.fillStyle = '#333333';
+            ctx.fillRect(0,0,width,height);
+            for(let i=0; i<40; i++) {
+                ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.3})`;
+                ctx.beginPath();
+                ctx.arc(Math.random()*width, Math.random()*height, Math.random()*40, 0, Math.PI*2);
+                ctx.fill();
+            }
         } else if (type === 'concrete') {
             ctx.globalCompositeOperation = 'multiply';
             ctx.fillStyle = '#444444';
@@ -649,6 +671,27 @@ class SparkSystem {
     }
 }
 
+export class EnemyProjectile {
+    public mesh: THREE.Mesh;
+    public velocity: THREE.Vector3;
+    public life: number = 5;
+    public damage: number = 10;
+    
+    constructor(pos: THREE.Vector3, dir: THREE.Vector3) {
+        this.mesh = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2, 8, 8),
+            new THREE.MeshStandardMaterial({color: 0x00ff00, emissive: 0x00ff00, emissiveIntensity: 2})
+        );
+        this.mesh.position.copy(pos);
+        this.velocity = dir.multiplyScalar(15); // Speed of projectile
+    }
+    
+    update(delta: number) {
+        this.mesh.position.add(this.velocity.clone().multiplyScalar(delta));
+        this.life -= delta;
+    }
+}
+
 export class GameEngine {
   public scene: THREE.Scene;
   public camera: THREE.PerspectiveCamera;
@@ -661,22 +704,27 @@ export class GameEngine {
   public flashlight: FlashlightController;
   public soundManager: SoundManager;
   public enemies: Enemy[] = [];
+  private damageTexts: { sprite: THREE.Sprite, life: number, velocity: THREE.Vector3 }[] = [];
   public materials: Record<string, THREE.Material> = {};
   
   private world: CANNON.World;
   private physicsObjects: { mesh: THREE.Mesh, body: CANNON.Body }[] = [];
   private playerPhysicsBody: CANNON.Body;
 
-  private onStatsUpdate: (bat: number, hp: number, wave: number, credits: number, genDisabled: boolean, restartProgress: number, totalKills: number, killsByType: Record<string, number>, ammo: number, stamina: number, overcharge: number, dash: number, hitMarker: number, isAimingEnemy: boolean, isBloodMoon: boolean, nearestDist: number | null, fMode: FlashlightMode) => void;
+  private onStatsUpdate: (bat: number, hp: number, wave: number, credits: number, genDisabled: boolean, restartProgress: number, totalKills: number, killsByType: Record<string, number>, ammo: number, stamina: number, overcharge: number, dash: number, hitMarker: number, isAimingEnemy: boolean, isBloodMoon: boolean, nearestDist: number | null, fMode: FlashlightMode, tText: string | null, rMsg: string | null) => void;
   private onPhaseChange: (phase: GamePhase) => void;
   private onInteract: (target: string) => void;
   private onHover: (isHovering: boolean, text: string) => void;
   private onDeathSequenceStart: () => void; 
 
   private generatorHp: number = 100;
-  private maxGeneratorHp: number = 100;
+  private maxGeneratorHp: number = 150;
   private wave: number = 0; 
-  private credits: number = 0;
+  private isTutorial: boolean = false;
+  private tutorialStep: number = 0;
+  private tutorialTimer: number = 0;
+  private tutorialText: string | null = null;
+  private credits: number = 50; 
   private totalKills: number = 0; 
   private killsByType: Record<string, number> = {};
   private phase: GamePhase = GamePhase.MENU;
@@ -689,8 +737,6 @@ export class GameEngine {
   private isBloodMoon: boolean = false; 
   
   private stamina: number = 100;
-  private trauma: number = 0; 
-  private stress: number = 0;
   private hitMarkerTrigger: number = 0;
   
   private isGeneratorDisabled: boolean = false;
@@ -712,6 +758,7 @@ export class GameEngine {
   private dashCooldown: number = 0;
   private isDashing: boolean = false;
   private dashTimer: number = 0;
+  private footstepTimer: number = 0;
   
   private rainSystem: RainSystem;
   private sporeSystem: SporeSystem;
@@ -720,9 +767,23 @@ export class GameEngine {
   private activeMines: Mine[] = [];
   public minesCount: number = 0;
   private activeLoot: LootDrop[] = [];
+  private activeProjectiles: EnemyProjectile[] = [];
   private nearestEnemyDistance: number | null = null;
   private lightningTimer: number = 0;
   private lightningDuration: number = 0;
+  private hallucinationTimer: number = 0;
+  
+  public currentRadioMessage: string | null = null;
+  private radioMessageTimer: number = 0;
+  private statsUpdateTimer: number = 0;
+  
+  public isBlackout: boolean = false;
+  private blackoutTimer: number = 0;
+  private blackoutDuration: number = 0;
+
+  private teslaMesh: THREE.Group | null = null;
+  private teslaLevel: number = 0;
+  private teslaCooldown: number = 0;
   
   private fanMesh: THREE.Group | null = null;
   private radioMesh: THREE.Group | null = null;
@@ -756,6 +817,7 @@ export class GameEngine {
   private sunLight: THREE.DirectionalLight;
   private boothLight: THREE.PointLight;
   private boothBulb: THREE.Mesh;
+  private emergencyLight: THREE.PointLight;
   private generatorPulse: number = 0;
   private genScreenCanvas!: HTMLCanvasElement;
   private genScreenCtx!: CanvasRenderingContext2D;
@@ -764,6 +826,8 @@ export class GameEngine {
   private walls: THREE.Box3[] = [];
   private obstacles: THREE.Box3[] = [];
   private occlusionObjects: THREE.Object3D[] = [];
+  private boothGroup: THREE.Group = new THREE.Group();
+  private boothLightFixture: THREE.Mesh | null = null;
   
   private moveForward: boolean = false;
   private moveBackward: boolean = false;
@@ -773,6 +837,19 @@ export class GameEngine {
   private velocity = new THREE.Vector3();
   private direction = new THREE.Vector3();
   private euler = new THREE.Euler(0, 0, 0, 'YXZ');
+  private shookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+  private zeroVec = new THREE.Vector3(0, 0, 0);
+  private tempVec3 = new THREE.Vector3();
+  private tempVec3Alt = new THREE.Vector3();
+  private tempVec2 = new THREE.Vector2();
+  private lastEnemyDistCheck: number = 0;
+  
+  // Pre-cached resources for optimization
+  private damageTextPool: THREE.Sprite[] = [];
+  private damageTextTexture: THREE.CanvasTexture | null = null;
+  private tempVec3_2 = new THREE.Vector3();
+  private playerBox = new THREE.Box3();
+  private playerSize = new THREE.Vector3(0.8, 2, 0.8);
   private PI_2 = Math.PI / 2;
 
   private windUniforms: { time: { value: number } };
@@ -797,7 +874,7 @@ export class GameEngine {
     container: HTMLElement, 
     loadingManager: THREE.LoadingManager,
     initialData: SaveData | null,
-    onStatsUpdate: (bat: number, hp: number, wave: number, credits: number, genDisabled: boolean, restartProgress: number, totalKills: number, killsByType: Record<string, number>, ammo: number, stamina: number, overcharge: number, dash: number, hitMarker: number, isAimingEnemy: boolean, isBloodMoon: boolean, nearestDist: number | null, fMode: FlashlightMode) => void,
+    onStatsUpdate: (bat: number, hp: number, wave: number, credits: number, genDisabled: boolean, restartProgress: number, totalKills: number, killsByType: Record<string, number>, ammo: number, stamina: number, overcharge: number, dash: number, hitMarker: number, isAimingEnemy: boolean, isBloodMoon: boolean, nearestDist: number | null, fMode: FlashlightMode, tText: string | null, rMsg: string | null) => void,
     onPhaseChange: (phase: GamePhase) => void,
     onInteract: (target: string) => void,
     onHover: (isHovering: boolean, text: string) => void,
@@ -873,7 +950,7 @@ export class GameEngine {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+    this.renderer.shadowMap.type = THREE.PCFShadowMap; // Faster than PCFSoft
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     container.appendChild(this.renderer.domElement);
@@ -887,16 +964,15 @@ export class GameEngine {
     // const horrorPass = new ShaderPass(HorrorColorGradeShader);
     // this.composer.addPass(horrorPass);
 
-    this.aberrationPass = new ShaderPass(ChromaticAberrationShader);
-    this.composer.addPass(this.aberrationPass);
+    // Removed aberrationPass for performance optimization
 
     this.bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(window.innerWidth, window.innerHeight),
-        2.0, 0.8, 0.4
+        new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2), // Half-res bloom
+        1.0, 0.4, 0.8
     );
-    this.bloomPass.threshold = 0.4; 
-    this.bloomPass.strength = 2.0;   
-    this.bloomPass.radius = 0.8;
+    this.bloomPass.threshold = 0.5; 
+    this.bloomPass.strength = 1.0;   
+    this.bloomPass.radius = 0.5;
     this.composer.addPass(this.bloomPass);
 
     // @ts-ignore
@@ -909,8 +985,6 @@ export class GameEngine {
     this.fxaaPass.material.uniforms['resolution'].value.y = 1 / (window.innerHeight * pixelRatio);
     this.composer.addPass(this.fxaaPass);
 
-    const vignettePass = new ShaderPass(VignetteShader);
-    this.composer.addPass(vignettePass);
     this.composer.addPass(new OutputPass());
 
     this.raycaster = new THREE.Raycaster();
@@ -937,6 +1011,7 @@ export class GameEngine {
     this.createPhysicsProps(); 
     this.createCobwebs();      
     this.createTurret();
+    this.createTeslaCoil();
 
     this.sparkSystem = new SparkSystem(this.scene);
     this.rainSystem = new RainSystem(this.scene);
@@ -1047,7 +1122,8 @@ export class GameEngine {
                           if (angle < coneAngle / 2) {
                               // Hit!
                               enemy.stun(4.0);
-                              const died = enemy.takeDamage(500, enemy.mesh.position.clone(), toEnemyDir.negate(), this.burnTexture);
+                              const { died, damage, isCritical } = enemy.takeDamage(500, enemy.mesh.position.clone(), toEnemyDir.negate(), this.burnTexture);
+                              if (damage > 0) this.spawnDamageText(damage, enemy.mesh.position, isCritical);
                               if (died) this.soundManager.playHitMarker();
                               
                               // Knockback
@@ -1134,11 +1210,52 @@ export class GameEngine {
   // ... Mechanics ... (Abbreviated to focus on updated methods)
 
   public addTrauma(amount: number) {
-      this.trauma = Math.min(this.trauma + amount, 1.0);
+      // Stubbed out based on user request to remove stress system
+  }
+
+  private spawnDamageText(amount: number, position: THREE.Vector3, isCritical: boolean) {
+      // PERF FIX: Reuse textures and sprites to prevent random lag spikes (GPU uploads)
+      if (!this.damageTextTexture) {
+          const canvas = document.createElement('canvas');
+          canvas.width = 128; // Smaller for performance
+          canvas.height = 128;
+          const ctx = canvas.getContext('2d')!;
+          ctx.font = 'bold 64px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText('!', 64, 64);
+          this.damageTextTexture = new THREE.CanvasTexture(canvas);
+      }
+
+      let sprite = this.damageTextPool.find(s => !s.visible);
+      if (!sprite) {
+          const material = new THREE.SpriteMaterial({ 
+              map: this.damageTextTexture, 
+              transparent: true, 
+              depthTest: false 
+          });
+          sprite = new THREE.Sprite(material);
+          this.damageTextPool.push(sprite);
+          this.scene.add(sprite);
+      }
+      
+      sprite.visible = true;
+      sprite.position.copy(position);
+      sprite.position.x += (Math.random() - 0.5) * 1.5;
+      sprite.position.y += 1.0 + Math.random() * 1.0;
+      sprite.position.z += (Math.random() - 0.5) * 1.5;
+      sprite.scale.set(1.5, 0.75, 1);
+      if (isCritical) sprite.scale.set(2.5, 1.25, 1);
+      
+      this.damageTexts.push({
+          sprite,
+          life: 1.0,
+          velocity: new THREE.Vector3((Math.random() - 0.5) * 2, 2 + Math.random() * 2, (Math.random() - 0.5) * 2)
+      });
   }
 
   private throwFlare() {
-      if (this.flaresCount > 0 && this.phase === GamePhase.NIGHT) {
+      if (this.flaresCount > 0 && (this.phase === GamePhase.NIGHT || this.isTutorial)) {
           this.flaresCount--;
           const direction = new THREE.Vector3();
           this.camera.getWorldDirection(direction);
@@ -1165,29 +1282,49 @@ export class GameEngine {
   }
 
   // Updated spawnWave logic remains same, used in startNight
-  public spawnWave(waveNumber: number) {
-      let points = 20 + waveNumber * 10 + Math.pow(waveNumber, 1.8);
+  private spawnWave(waveNumber: number) {
+      // Balanced challenge: harder than before, but still accessible
+      let points = 16 + waveNumber * 5.0 + Math.pow(waveNumber, 1.35);
+      
+      // Narrative Dispatcher
+      if (waveNumber === 1) {
+          this.playRadioMessage("Внимание, Страж... Сектор 4 зафиксировал аномальное сжатие. Тени начали материализацию. Фактор риска: умеренный.");
+      } else if (waveNumber === 3) {
+          this.playRadioMessage("Обнаружен всплеск электромагнитных помех. Что-то крупное движется из Глубины. Защищайте Ядро любой ценой.");
+      } else if (waveNumber === 5) {
+          this.playRadioMessage("Протоколы эвакуации изменены. Командование приказало извлечь Ядро... персонал считается избыточным. Продержись до 10-го цикла.");
+      } else if (waveNumber === 10) {
+          this.playRadioMessage("Ядро стабилизировано. Извлечение завершено. Точка эвакуации в километре к северу. Беги, пока лес не поглотил нас всех.");
+      }
+
       if (waveNumber % 3 === 0) {
           this.isBloodMoon = true;
-          points *= 1.5; 
+          points *= 1.15; // Reduced blood moon multiplier
       } else {
           this.isBloodMoon = false;
       }
 
-      if (waveNumber > 0 && waveNumber % 10 === 0) {
+      if (waveNumber > 0 && waveNumber % 15 === 0) {
+          const boss = new LeviathanBoss();
+          const angle = Math.random() * Math.PI * 2;
+          boss.mesh.position.set(Math.cos(angle) * 50, 0, Math.sin(angle) * 50);
+          this.enemies.push(boss);
+          this.scene.add(boss.mesh);
+          points += 100; // Extra points to spawn minions (reduced from 300)
+      } else if (waveNumber > 0 && waveNumber % 10 === 0) {
           const boss = new ForestHeartBoss();
           const angle = Math.random() * Math.PI * 2;
           boss.mesh.position.set(Math.cos(angle) * 40, 0, Math.sin(angle) * 40);
           this.enemies.push(boss);
           this.scene.add(boss.mesh);
-          points -= 100;
+          points += 50;
       } else if (waveNumber > 0 && waveNumber % 5 === 0) {
           const boss = new ShriekerBoss();
           const angle = Math.random() * Math.PI * 2;
           boss.mesh.position.set(Math.cos(angle) * 30, 1.5, Math.sin(angle) * 30);
           this.enemies.push(boss);
           this.scene.add(boss.mesh);
-          points -= 50;
+          points += 25;
       }
 
       const spawn = (Cls: any, cost: number) => {
@@ -1198,7 +1335,7 @@ export class GameEngine {
               enemy.mesh.position.set(Math.cos(angle) * r, 1, Math.sin(angle) * r);
               
               if (this.isBloodMoon) {
-                  enemy.speed *= 1.3; 
+                  enemy.speed *= 1.15; 
                   (enemy.mesh.material as THREE.MeshStandardMaterial).emissive.setHex(0xff0000);
                   (enemy.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.5;
               }
@@ -1213,17 +1350,66 @@ export class GameEngine {
       };
 
       let attempts = 0;
-      while (points > 3 && attempts < 200) {
+      while (points > 3 && attempts < 300) {
           attempts++;
           const roll = Math.random();
           let spawned = false;
-          if (waveNumber >= 6 && roll < 0.15) spawned = spawn(GlitcherEnemy, 12);
-          else if (waveNumber >= 5 && roll < 0.25) spawned = spawn(PhantomEnemy, 10);
-          else if (waveNumber >= 4 && roll < 0.35) spawned = spawn(DrainerEnemy, 10);
-          else if (waveNumber >= 3 && roll < 0.5) spawned = spawn(TankEnemy, 15);
-          else if (waveNumber >= 2 && roll < 0.7) spawned = spawn(FastEnemy, 8);
+          
+          if (waveNumber >= 12 && roll < 0.1) spawned = spawn(ShriekerBoss, 80); // Minibosses!
+          else if (waveNumber >= 10 && roll < 0.15) spawned = spawn(SpitterEnemy, 12);
+          else if (waveNumber >= 6 && roll < 0.25) spawned = spawn(GlitcherEnemy, 12);
+          else if (waveNumber >= 5 && roll < 0.35) spawned = spawn(PhantomEnemy, 10);
+          else if (waveNumber >= 4 && roll < 0.45) spawned = spawn(DrainerEnemy, 10);
+          else if (waveNumber >= 3 && roll < 0.55) spawned = spawn(SpitterEnemy, 12);
+          else if (waveNumber >= 3 && roll < 0.70) spawned = spawn(TankEnemy, 15);
+          else if (waveNumber >= 2 && roll < 0.85) spawned = spawn(FastEnemy, 8);
           else spawned = spawn(NormalEnemy, 5);
+          
           if (!spawned && points < 5) break; 
+      }
+  }
+
+  public startTutorial() {
+      this.turretTarget = null;
+      this.enemies.forEach(e => this.scene.remove(e.mesh));
+      this.enemies = []; 
+      
+      this.phase = GamePhase.NIGHT;
+      this.wave = 0;
+      this.isTutorial = true;
+      this.tutorialStep = 0;
+      this.tutorialTimer = 0;
+      this.tutorialText = "СМЕНА 0: ОБУЧЕНИЕ\nИспользуйте [W][A][S][D] для перемещения.";
+      
+      this.onPhaseChange(GamePhase.NIGHT);
+      this.flashlight.turnOff();
+      
+      this.sunLight.intensity = 0.15;
+      this.hemiLight.intensity = 0.25;
+      this.scene.background = new THREE.Color(COLORS.SKY_NIGHT);
+      this.fog.color.setHex(COLORS.FOG);
+      this.fog.near = 2;
+      this.fog.far = 40;
+      this.sunLight.color.setHex(0xaaaaaa);
+      
+      this.camera.position.set(0, 1.6, 5);
+      this.euler.set(0, 0, 0);
+      this.camera.quaternion.setFromEuler(this.euler);
+  }
+
+  public triggerRadio(message: string, duration: number = 6.0) {
+      this.currentRadioMessage = message;
+      this.radioMessageTimer = duration;
+      // Also turn on the physical radio prop for visual/audio effect
+      if (this.radioMesh && this.radioMesh.children.length > 4) {
+          const mat = this.radioMesh.children[4] as THREE.Mesh;
+          if(mat.material instanceof THREE.MeshBasicMaterial) {
+              mat.material.color.setHex(0x00ff00);
+              mat.material.opacity = 1.0;
+          }
+      }
+      if (this.radioAudio && !this.radioAudio.isPlaying) {
+          this.radioAudio.play();
       }
   }
 
@@ -1241,6 +1427,20 @@ export class GameEngine {
       this.sunLight.intensity = 0.15;
       this.hemiLight.intensity = 0.25;
       
+      if (this.wave === 1) {
+          this.triggerRadio("HQ: Смена началась. Держи Гелиос-9 заряженным. Следи за лесом.");
+      } else if (this.isBloodMoon) {
+          this.triggerRadio("HQ: Внимание. Гравитационные аномалии. 'Кровавая луна'. Их активность повышена.");
+      } else if (this.wave === 5) {
+          this.triggerRadio("HQ: Радары фиксируют крупный биологический объект. Крикун. Закрой уши.");
+      } else if (this.wave === 10) {
+          this.triggerRadio("HQ: Наши приборы слепнут! Огромная структура формируется над землей! Уничтожь её!");
+      } else if (this.wave === 15) {
+          this.triggerRadio("HQ: ...они прорвали периметр. Проект Тень... Левиафан на свободе. Прости нас. Эвакуации не будет.");
+      } else if (this.wave > 15) {
+          this.triggerRadio("HQ: [СИГНАЛ ПОТЕРЯН] ...");
+      }
+
       if (this.isBloodMoon) {
           this.scene.background = new THREE.Color(COLORS.BLOOD_MOON);
           this.fog.color.setHex(COLORS.BLOOD_MOON);
@@ -1256,8 +1456,8 @@ export class GameEngine {
       }
       
       if(this.bloomPass) {
-          this.bloomPass.strength = 1.2;
-          this.bloomPass.threshold = 0.7;
+          this.bloomPass.strength = 0.8;
+          this.bloomPass.threshold = 0.85;
       }
       this.renderer.toneMappingExposure = 1.0;
 
@@ -1284,6 +1484,11 @@ export class GameEngine {
           this.turretLevel++;
       } else if (id === 'turret_ammo') {
           this.turretAmmo += 100;
+      } else if (id === 'tesla_coil') {
+          this.teslaLevel++;
+          if (this.teslaLevel === 1 && this.teslaMesh) {
+              this.teslaMesh.visible = true;
+          }
       } else if (id === 'dash_boots') {
           this.dashLevel++;
       } else if (id === 'adrenaline') {
@@ -1350,6 +1555,82 @@ export class GameEngine {
       });
   }
 
+  private updateTutorial(delta: number) {
+      if (!this.isTutorial) return;
+
+      this.tutorialTimer += delta;
+      this.flashlight.setBattery(100); // Keep battery full during tutorial
+
+      switch (this.tutorialStep) {
+          case 0: // Learn to walk
+              if (this.moveForward || this.moveBackward || this.moveLeft || this.moveRight) {
+                  if (this.tutorialTimer > 3) {
+                      this.tutorialStep++;
+                      this.tutorialTimer = 0;
+                      this.tutorialText = "Нажмите [ЛКМ] или [F], чтобы включить фонарь.\nСвет - ваше единственное оружие.";
+                  }
+              } else {
+                  this.tutorialTimer = 0; // Reset if they stop moving before 3 seconds
+              }
+              break;
+          case 1: // Learn flashlight
+              if (this.flashlight.isLightOn()) {
+                  this.tutorialStep++;
+                  this.tutorialTimer = 0;
+                  this.tutorialText = "Отлично. Свет отпугивает и сжигает теней.\nОжидайте появления врага.";
+              }
+              break;
+          case 2: // Wait for enemy
+              if (this.tutorialTimer > 4) {
+                  this.tutorialStep++;
+                  this.tutorialTimer = 0;
+                  this.tutorialText = "Наведите фонарь на тень, чтобы уничтожить её.";
+                  // Spawn one normal enemy
+                  const enemy = new NormalEnemy();
+                  enemy.mesh.position.set(0, 0, -15);
+                  this.scene.add(enemy.mesh);
+                  this.enemies.push(enemy);
+              }
+              break;
+          case 3: // Kill enemy
+              if (this.enemies.length === 0) {
+                  this.tutorialStep++;
+                  this.tutorialTimer = 0;
+                  this.tutorialText = "Тень уничтожена.\nНажмите [ПКМ], чтобы активировать ПЕРЕГРУЗКУ фонаря.";
+              }
+              break;
+          case 4: // Overcharge
+              if (this.flashlight.isOvercharging()) {
+                  this.tutorialStep++;
+                  this.tutorialTimer = 0;
+                  this.tutorialText = "Перегрузка ослепляет всех врагов вокруг.\nИспользуйте её в критических ситуациях.";
+                  this.flaresCount = 1; // Give 1 flare
+              }
+              break;
+          case 5: // Wait for overcharge text
+              if (this.tutorialTimer > 4) {
+                  this.tutorialStep++;
+                  this.tutorialTimer = 0;
+                  this.tutorialText = "Нажмите [G], чтобы бросить флаер.\nОн создает безопасную зону света.";
+              }
+              break;
+          case 6: // Throw flare
+              if (this.activeFlares.length > 0) {
+                  this.tutorialStep++;
+                  this.tutorialTimer = 0;
+                  this.tutorialText = "Отлично. Обучение пройдено.\nВы готовы к смене.";
+              }
+              break;
+          case 7: // End tutorial
+              if (this.tutorialTimer > 4) {
+                  this.isTutorial = false;
+                  this.tutorialText = null;
+                  this.endNight();
+              }
+              break;
+      }
+  }
+
   private updateMovement(delta: number) {
       if (!this.isLocking || this.isTransitioning || this.isUIOpen) return;
 
@@ -1406,11 +1687,23 @@ export class GameEngine {
       this.camera.translateX(moveX);
       this.camera.translateZ(moveZ);
 
+      const targetTilt = this.moveLeft ? 0.03 : (this.moveRight ? -0.03 : 0);
+      this.euler.z = THREE.MathUtils.lerp(this.euler.z, targetTilt, delta * 5);
+
       if (this.moveForward || this.moveBackward || this.moveLeft || this.moveRight) {
           this.bobTimer += delta * (this.isSprinting ? 18 : 12);
           this.camera.position.y = 1.6 + Math.sin(this.bobTimer) * 0.05;
+          
+          this.footstepTimer += delta * (this.isSprinting ? 1.5 : 1.0);
+          if (this.footstepTimer > 0.4) {
+              this.soundManager.playFootstep();
+              this.footstepTimer = 0;
+          }
       } else {
-          this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, 1.6, delta * 5);
+          // Subtle breathing effect when standing still
+          this.bobTimer += delta * 2;
+          this.camera.position.y = 1.6 + Math.sin(this.bobTimer) * 0.015;
+          this.footstepTimer = 0.3; // Reset so next step happens soon
       }
 
       // FOV Sprint Effect
@@ -1429,38 +1722,36 @@ export class GameEngine {
       }
       
       const PLAYER_RADIUS = 0.4;
-      const playerBox = new THREE.Box3();
-      playerBox.setFromCenterAndSize(this.camera.position, new THREE.Vector3(PLAYER_RADIUS * 2, 2, PLAYER_RADIUS * 2));
+      this.playerBox.setFromCenterAndSize(this.camera.position, this.playerSize);
 
       for(const wall of this.walls) {
-          if (wall.intersectsBox(playerBox)) {
-               const wallCenter = new THREE.Vector3(); wall.getCenter(wallCenter);
-               const wallSize = new THREE.Vector3(); wall.getSize(wallSize);
-               const dx = this.camera.position.x - wallCenter.x;
-               const dz = this.camera.position.z - wallCenter.z;
-               const safeX = wallSize.x/2 + PLAYER_RADIUS + 0.01;
-               const safeZ = wallSize.z/2 + PLAYER_RADIUS + 0.01;
-               if (Math.abs(dx / wallSize.x) > Math.abs(dz / wallSize.z)) {
-                   this.camera.position.x = wallCenter.x + (dx > 0 ? safeX : -safeX);
+          if (wall.intersectsBox(this.playerBox)) {
+               wall.getCenter(this.tempVec3);
+               wall.getSize(this.tempVec3_2);
+               const dx = this.camera.position.x - this.tempVec3.x;
+               const dz = this.camera.position.z - this.tempVec3.z;
+               const safeX = this.tempVec3_2.x/2 + PLAYER_RADIUS + 0.01;
+               const safeZ = this.tempVec3_2.z/2 + PLAYER_RADIUS + 0.01;
+               if (Math.abs(dx / this.tempVec3_2.x) > Math.abs(dz / this.tempVec3_2.z)) {
+                   this.camera.position.x = this.tempVec3.x + (dx > 0 ? safeX : -safeX);
                } else {
-                   this.camera.position.z = wallCenter.z + (dz > 0 ? safeZ : -safeZ);
+                   this.camera.position.z = this.tempVec3.z + (dz > 0 ? safeZ : -safeZ);
                }
           }
       }
       for(const obs of this.obstacles) {
-          if (obs.intersectsBox(playerBox)) {
-               const obsCenter = new THREE.Vector3(); obs.getCenter(obsCenter);
-               const obsSize = new THREE.Vector3(); obs.getSize(obsSize);
-               const dx = this.camera.position.x - obsCenter.x;
-               const dz = this.camera.position.z - obsCenter.z;
-               const safeX = obsSize.x/2 + PLAYER_RADIUS + 0.01;
-               const safeZ = obsSize.z/2 + PLAYER_RADIUS + 0.01;
-               if (Math.abs(dx / obsSize.x) > Math.abs(dz / obsSize.z)) {
-                   this.camera.position.x = obsCenter.x + (dx > 0 ? safeX : -safeX);
-               } else {
-                   // FIX: Cannot find name 'wallCenter'.
-                   this.camera.position.z = obsCenter.z + (dz > 0 ? safeZ : -safeZ);
-               }
+          if (obs.intersectsBox(this.playerBox)) {
+              obs.getCenter(this.tempVec3);
+              obs.getSize(this.tempVec3_2);
+              const dx = this.camera.position.x - this.tempVec3.x;
+              const dz = this.camera.position.z - this.tempVec3.z;
+              const safeX = this.tempVec3_2.x/2 + PLAYER_RADIUS + 0.01;
+              const safeZ = this.tempVec3_2.z/2 + PLAYER_RADIUS + 0.01;
+              if (Math.abs(dx / this.tempVec3_2.x) > Math.abs(dz / this.tempVec3_2.z)) {
+                  this.camera.position.x = this.tempVec3.x + (dx > 0 ? safeX : -safeX);
+              } else {
+                  this.camera.position.z = this.tempVec3.z + (dz > 0 ? safeZ : -safeZ);
+              }
           }
       }
 
@@ -1478,7 +1769,7 @@ export class GameEngine {
               this.onHover(false, "");
           }
           if (this.isGeneratorDisabled) {
-              const dist = this.camera.position.distanceTo(new THREE.Vector3(-1.4, 0.5, -1.4));
+              const dist = this.camera.position.distanceTo(this.tempVec3.set(-1.4, 0.5, -1.4));
               if (dist < 3) this.hoveredTarget = 'generator';
           }
           return;
@@ -1651,6 +1942,8 @@ export class GameEngine {
       this.flaresCount = 0;
       this.minesCount = 0;
       this.stamina = 100;
+      this.teslaLevel = 0;
+      if (this.teslaMesh) this.teslaMesh.visible = false;
       this.activeFlares.forEach(f => this.scene.remove(f.mesh));
       this.activeFlares = [];
       this.activeMines.forEach(m => this.scene.remove(m.mesh));
@@ -1764,23 +2057,81 @@ export class GameEngine {
       createProp('cylinder', {r: 0.04, h: 0.12}, new THREE.Vector3(1.3, 1.2, 0.2), 0xff0000, 0.2); 
       createProp('box', {x: 0.15, y: 0.2, z: 0.08}, new THREE.Vector3(1.2, 1.2, 0.7), 0x333333, 0.8);
       
-      const mugGeo = new THREE.CylinderGeometry(0.05, 0.04, 0.1);
+      // Improved Mug with handle
+      const mugGroup = new THREE.Group();
+      const mugGeo = new THREE.CylinderGeometry(0.05, 0.04, 0.1, 16);
       const mugMat = new THREE.MeshStandardMaterial({ 
           color: 0xffffff,
           map: new THREE.CanvasTexture(TextureUtils.createNoiseCanvas(128, 128, 'ceramic'))
       });
       mugMat.map!.colorSpace = THREE.SRGBColorSpace;
-      const mugMesh = new THREE.Mesh(mugGeo, mugMat);
+      const mugBodyMesh = new THREE.Mesh(mugGeo, mugMat);
+      mugBodyMesh.castShadow = true;
+      mugGroup.add(mugBodyMesh);
+      
+      const handleGeo = new THREE.TorusGeometry(0.03, 0.008, 8, 16);
+      const handleMesh = new THREE.Mesh(handleGeo, mugMat);
+      handleMesh.position.set(0.05, 0, 0);
+      handleMesh.castShadow = true;
+      mugGroup.add(handleMesh);
+      
       this.materials.ceramic = mugMat;
-      mugMesh.castShadow = true;
-      this.scene.add(mugMesh);
+      this.scene.add(mugGroup);
+      
       const mugBody = new CANNON.Body({ mass: 0.5 });
       mugBody.addShape(new CANNON.Cylinder(0.05, 0.04, 0.1, 8));
       const q = new CANNON.Quaternion(); q.setFromAxisAngle(new CANNON.Vec3(1,0,0), -Math.PI/2);
       mugBody.quaternion = q;
       mugBody.position.set(1.5, 1.2, -0.2);
       this.world.addBody(mugBody);
-      this.physicsObjects.push({mesh: mugMesh, body: mugBody});
+      this.physicsObjects.push({mesh: mugGroup, body: mugBody});
+      
+      // Create exterior props (crates, barrels, sandbags)
+      const propGroup = new THREE.Group();
+      
+      const crateGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+      const crateMat = new THREE.MeshStandardMaterial({color: 0x5a4a3a, roughness: 0.9});
+      const crate1 = new THREE.Mesh(crateGeo, crateMat);
+      crate1.position.set(-2.6, 0.4, 2.0);
+      crate1.castShadow = true;
+      crate1.receiveShadow = true;
+      propGroup.add(crate1);
+      this.obstacles.push(new THREE.Box3().setFromObject(crate1));
+      
+      const crate2 = new THREE.Mesh(crateGeo, crateMat);
+      crate2.position.set(-2.8, 0.4, 1.2);
+      crate2.rotation.y = 0.2;
+      crate2.castShadow = true;
+      crate2.receiveShadow = true;
+      propGroup.add(crate2);
+      this.obstacles.push(new THREE.Box3().setFromObject(crate2));
+      
+      const crate3 = new THREE.Mesh(crateGeo, crateMat);
+      crate3.position.set(-2.5, 1.2, 1.6);
+      crate3.rotation.y = -0.1;
+      crate3.rotation.z = 0.05;
+      crate3.castShadow = true;
+      crate3.receiveShadow = true;
+      propGroup.add(crate3);
+      this.obstacles.push(new THREE.Box3().setFromObject(crate3));
+      
+      const barrelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.9, 16);
+      const barrelMat = new THREE.MeshStandardMaterial({color: 0x2233aa, roughness: 0.6, metalness: 0.5});
+      const barrel1 = new THREE.Mesh(barrelGeo, barrelMat);
+      barrel1.position.set(2.5, 0.45, 1.5);
+      barrel1.castShadow = true;
+      barrel1.receiveShadow = true;
+      propGroup.add(barrel1);
+      this.obstacles.push(new THREE.Box3().setFromObject(barrel1));
+
+      const barrel2 = new THREE.Mesh(barrelGeo, barrelMat);
+      barrel2.position.set(2.8, 0.45, 2.0);
+      barrel2.castShadow = true;
+      barrel2.receiveShadow = true;
+      propGroup.add(barrel2);
+      this.obstacles.push(new THREE.Box3().setFromObject(barrel2));
+      
+      this.scene.add(propGroup);
   }
 
   // UPDATED: More detailed environments
@@ -1816,7 +2167,6 @@ export class GameEngine {
         normalMap: woodNormal, 
         map: new THREE.CanvasTexture(woodDiffuse) 
     });
-    woodMat.map!.colorSpace = THREE.SRGBColorSpace;
     this.materials.wood = woodMat;
     
     const metalDiffuse = TextureUtils.createNoiseCanvas(256, 256, 'metal');
@@ -1829,13 +2179,21 @@ export class GameEngine {
         map: new THREE.CanvasTexture(metalDiffuse) 
     });
     this.materials.metal = metalMat;
-
+    
     const glassMat = new THREE.MeshPhysicalMaterial({
-        color: 0xffffff, metalness: 0, roughness: 0.2, transmission: 0.9, thickness: 0.1, transparent: true, opacity: 0.3
+        color: 0xffffff,
+        metalness: 0,
+        roughness: 0.05,
+        transmission: 0.99,
+        thickness: 0.1,
+        transparent: true,
+        opacity: 0.02, // Ultra transparent as requested
+        ior: 1.45
     });
     this.materials.glass = glassMat;
     
-    const boothGroup = new THREE.Group();
+    this.boothGroup = new THREE.Group();
+    const boothGroup = this.boothGroup;
     const floor = new THREE.Mesh(new THREE.BoxGeometry(4, 0.2, 4), metalMat);
     floor.position.y = 0.1;
     floor.receiveShadow = true;
@@ -1917,12 +2275,45 @@ export class GameEngine {
     this.walls.push(new THREE.Box3(new THREE.Vector3(-2.0, 0, -2.1), new THREE.Vector3(-1.0, 3, -1.8)));
 
     const frontPanelR = new THREE.Mesh(new THREE.BoxGeometry(0.9, 3, 0.1), woodMat);
-    frontPanelR.position.set(1.5, 1.5, -1.95); boothGroup.add(frontPanelR);
+    frontPanelR.position.set(1.5, 1.5, -1.95);
+    boothGroup.add(frontPanelR);
     this.walls.push(new THREE.Box3(new THREE.Vector3(1.0, 0, -2.1), new THREE.Vector3(2.0, 3, -1.8)));
+
+    // --- BOOTH DETAILS ---
+    // Posters
+    const posterGeo = new THREE.PlaneGeometry(0.5, 0.7);
+    const posterMat = new THREE.MeshStandardMaterial({ 
+        color: 0x999999,
+        roughness: 0.8,
+        map: new THREE.CanvasTexture(TextureUtils.createNoiseCanvas(256, 256, 'flesh')) // reused for some paper-like texture
+    });
+    const poster1 = new THREE.Mesh(posterGeo, posterMat);
+    poster1.position.set(-1.2, 2.0, 1.89);
+    boothGroup.add(poster1);
+    
+    // Scraps on floor
+    const scrapGeo = new THREE.PlaneGeometry(0.2, 0.2);
+    for(let i=0; i<5; i++) {
+        const scrap = new THREE.Mesh(scrapGeo, new THREE.MeshStandardMaterial({color: 0xeeeeee, transparent: true, opacity: 0.7}));
+        scrap.position.set((Math.random()-0.5)*3, 0.21, (Math.random()-0.5)*3);
+        scrap.rotation.x = -Math.PI/2;
+        scrap.rotation.z = Math.random()*Math.PI;
+        boothGroup.add(scrap);
+    }
+
+    // Overhead Light Fixture
+    const ceilingCableGeo = new THREE.CylinderGeometry(0.01, 0.01, 0.5);
+    const ceilingCable = new THREE.Mesh(ceilingCableGeo, metalMat);
+    ceilingCable.position.set(0, 3.0, 0);
+    boothGroup.add(ceilingCable);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshStandardMaterial({emissive: 0xffffaa, emissiveIntensity: 1}));
+    bulb.position.set(0, 2.75, 0);
+    boothGroup.add(bulb);
+    this.boothLightFixture = bulb;
 
     // --- SCI-FI GENERATOR ---
     this.generatorGroup = new THREE.Group();
-    this.generatorGroup.position.set(-1.4, 0.2, -1.4); // Moved closer to the wall
+    this.generatorGroup.position.set(-1.4, 0.2, -1.4); // Standard position
     
     const baseMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8, metalness: 0.5 });
     const metalAccentMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.4, metalness: 0.9 });
@@ -1981,8 +2372,8 @@ export class GameEngine {
     this.generatorGroup.add(panel);
 
     // Warning Stripes
-    const stripeGeo = new THREE.BoxGeometry(0.82, 0.05, 0.82);
-    const stripe1 = new THREE.Mesh(stripeGeo, warningMat);
+    const genStripeGeo = new THREE.BoxGeometry(0.82, 0.05, 0.82);
+    const stripe1 = new THREE.Mesh(genStripeGeo, warningMat);
     stripe1.position.set(0, 0.15, 0);
     this.generatorGroup.add(stripe1);
 
@@ -1998,6 +2389,10 @@ export class GameEngine {
     cable2.position.set(-0.2, 0.4, -0.3);
     cable2.rotation.x = Math.PI / 4;
     this.generatorGroup.add(cable2);
+
+    this.emergencyLight = new THREE.PointLight(0xff0000, 0, 10);
+    this.emergencyLight.position.set(0, 1.5, 0);
+    this.generatorGroup.add(this.emergencyLight);
 
     boothGroup.add(this.generatorGroup);
     
@@ -2034,22 +2429,56 @@ export class GameEngine {
 
     // Fan
     this.fanMesh = new THREE.Group();
-    const fanBase = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.05), metalMat);
+    const fanBaseGeo = new THREE.CylinderGeometry(0.12, 0.15, 0.05, 16);
+    const fanBase = new THREE.Mesh(fanBaseGeo, metalMat);
     this.fanMesh.add(fanBase);
-    const fanStem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.2), metalMat);
-    fanStem.position.y = 0.1;
+    
+    const fanStemGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 8);
+    const fanStem = new THREE.Mesh(fanStemGeo, metalMat);
+    fanStem.position.y = 0.15;
     this.fanMesh.add(fanStem);
+    
+    const fanMotorGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.15, 16);
+    const fanMotor = new THREE.Mesh(fanMotorGeo, new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.8}));
+    fanMotor.rotation.x = Math.PI / 2;
+    fanMotor.position.set(0, 0.28, -0.05);
+    this.fanMesh.add(fanMotor);
+
     const bladeGroup = new THREE.Group();
-    bladeGroup.position.set(0, 0.2, 0.05);
-    const bladeGeo = new THREE.BoxGeometry(0.05, 0.4, 0.01);
-    const blade1 = new THREE.Mesh(bladeGeo, new THREE.MeshStandardMaterial({color: 0x222222}));
+    bladeGroup.position.set(0, 0.28, 0.05);
+    
+    const bladeCenterGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.02, 16);
+    const bladeCenter = new THREE.Mesh(bladeCenterGeo, metalMat);
+    bladeCenter.rotation.x = Math.PI / 2;
+    bladeGroup.add(bladeCenter);
+
+    const bladeGeo = new THREE.BoxGeometry(0.06, 0.35, 0.01);
+    const bladeMat = new THREE.MeshStandardMaterial({color: 0x222222, roughness: 0.5});
+    const blade1 = new THREE.Mesh(bladeGeo, bladeMat);
     const blade2 = blade1.clone(); blade2.rotation.z = Math.PI / 2;
     bladeGroup.add(blade1, blade2);
+    
+    // Fan cage
+    const cageGeo = new THREE.TorusGeometry(0.2, 0.01, 8, 32);
+    const cageMat = new THREE.MeshStandardMaterial({color: 0x888888, metalness: 0.8, roughness: 0.2});
+    const cageFront = new THREE.Mesh(cageGeo, cageMat);
+    cageFront.position.set(0, 0.28, 0.08);
+    const cageBack = new THREE.Mesh(cageGeo, cageMat);
+    cageBack.position.set(0, 0.28, 0.02);
+    this.fanMesh.add(cageFront, cageBack);
+
     this.fanMesh.add(bladeGroup);
     this.fanMesh.userData.blades = bladeGroup;
     this.fanMesh.position.set(1.5, 1.05, 1.0);
     this.fanMesh.rotation.y = -Math.PI / 4;
     this.fanMesh.name = "fan";
+    
+    // Add invisible hit box for easier interaction
+    const fanHitBox = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.4, 0.25), new THREE.MeshBasicMaterial({visible: false}));
+    fanHitBox.position.y = 0.25;
+    fanHitBox.name = "fan";
+    this.fanMesh.add(fanHitBox);
+    
     boothGroup.add(this.fanMesh);
     
     this.fanAudio = this.soundManager.setupInteractableSound(this.fanMesh, 'fan');
@@ -2057,18 +2486,59 @@ export class GameEngine {
 
     // Radio
     this.radioMesh = new THREE.Group();
+    
+    // Main body
     const radioMat = new THREE.MeshStandardMaterial({
-        color: 0x110000,
+        color: 0x331111, // Dark red/brown wood-like color
+        roughness: 0.9,
         map: new THREE.CanvasTexture(TextureUtils.createNoiseCanvas(128, 128, 'plastic'))
     });
     radioMat.map!.colorSpace = THREE.SRGBColorSpace;
-    const radioBox = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.15, 0.1), radioMat);
-    this.materials.plastic = radioMat;
+    const radioBox = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.15), radioMat);
     this.radioMesh.add(radioBox);
-    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.4), metalMat);
-    antenna.position.set(0.12, 0.2, -0.04);
+    
+    // Speaker grill
+    const grillGeo = new THREE.PlaneGeometry(0.15, 0.15);
+    const grillMat = new THREE.MeshStandardMaterial({color: 0x111111, wireframe: true});
+    const grill = new THREE.Mesh(grillGeo, grillMat);
+    grill.position.set(-0.08, 0, 0.076);
+    this.radioMesh.add(grill);
+    
+    // Dials
+    const dialGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.02, 16);
+    const dialMat = new THREE.MeshStandardMaterial({color: 0x888888, metalness: 0.5});
+    const dial1 = new THREE.Mesh(dialGeo, dialMat);
+    dial1.rotation.x = Math.PI / 2;
+    dial1.position.set(0.12, 0.04, 0.075);
+    this.radioMesh.add(dial1);
+    
+    const dial2 = dial1.clone();
+    dial2.position.set(0.12, -0.04, 0.075);
+    this.radioMesh.add(dial2);
+    
+    // Frequency display
+    const displayGeo = new THREE.PlaneGeometry(0.15, 0.04);
+    const displayMat = new THREE.MeshBasicMaterial({color: 0x00ff00, transparent: true, opacity: 0.5});
+    const display = new THREE.Mesh(displayGeo, displayMat);
+    display.position.set(0.08, 0.05, 0.076);
+    this.radioMesh.add(display);
+
+    // Antenna
+    const antennaBase = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.05), metalMat);
+    antennaBase.position.set(0.15, 0.1, -0.05);
+    this.radioMesh.add(antennaBase);
+    
+    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.5), metalMat);
+    antenna.position.set(0.15, 0.35, -0.05);
+    antenna.rotation.z = -Math.PI / 8;
     this.radioMesh.add(antenna);
-    this.radioMesh.position.set(1.5, 1.08, -0.1);
+    
+    // Invisible hit box
+    const radioHitBox = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.15), new THREE.MeshBasicMaterial({visible: false}));
+    radioHitBox.name = "radio";
+    this.radioMesh.add(radioHitBox);
+
+    this.radioMesh.position.set(1.5, 1.1, -0.1);
     this.radioMesh.rotation.y = Math.PI / 6;
     this.radioMesh.name = "radio";
     boothGroup.add(this.radioMesh);
@@ -2081,7 +2551,7 @@ export class GameEngine {
   }
 
   private createForest() {
-      const treeCount = 400;
+      const treeCount = 200; // Restored count but kept shadow optimizations
       
       const woodTexCanvas = TextureUtils.createNoiseCanvas(256, 256, 'wood');
       const woodTex = new THREE.CanvasTexture(woodTexCanvas);
@@ -2100,10 +2570,10 @@ export class GameEngine {
       const instancedTrunk = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
       const instancedLeaves = new THREE.InstancedMesh(leavesGeo, leavesMat, treeCount * 3);
       
-      instancedTrunk.castShadow = true;
-      instancedLeaves.castShadow = true;
-      instancedTrunk.receiveShadow = true;
-      instancedLeaves.receiveShadow = true;
+      instancedTrunk.castShadow = false;
+      instancedLeaves.castShadow = false;
+      instancedTrunk.receiveShadow = false; // Disable receive shadow
+      instancedLeaves.receiveShadow = false; // Disable receive shadow
 
       const dummy = new THREE.Object3D();
 
@@ -2144,12 +2614,12 @@ export class GameEngine {
   }
 
   private createUndergrowth() {
-      const grassCount = 30000;
+      const grassCount = 10000; // Restored count but kept shadow optimizations
       const geo = new THREE.PlaneGeometry(0.2, 0.35);
       geo.translate(0, 0.175, 0); // Pivot at base
       const grassTex = TextureUtils.createGrassBladeTexture();
       
-      const mat = new THREE.MeshStandardMaterial({
+      const mat = new THREE.MeshBasicMaterial({ // optimization
           map: grassTex,
           transparent: true,
           side: THREE.DoubleSide,
@@ -2162,6 +2632,8 @@ export class GameEngine {
       };
 
       const mesh = new THREE.InstancedMesh(geo, mat, grassCount);
+      mesh.castShadow = false; // Add this
+      mesh.receiveShadow = false; // Add this
       const dummy = new THREE.Object3D();
       const color = new THREE.Color();
       
@@ -2216,41 +2688,67 @@ export class GameEngine {
       this.scene.add(this.turretGroup);
   }
 
+  private createTeslaCoil() {
+      this.teslaMesh = new THREE.Group();
+      this.teslaMesh.position.set(1.5, 3.5, 1.5); // On roof corner
+      
+      const mat = new THREE.MeshStandardMaterial({color: 0x444444, metalness: 0.8, roughness: 0.2});
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 0.2), mat);
+      this.teslaMesh.add(base);
+      
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.0), mat);
+      stem.position.y = 0.6;
+      this.teslaMesh.add(stem);
+      
+      const toroidMat = new THREE.MeshStandardMaterial({color: 0x888888, metalness: 0.9, roughness: 0.1});
+      const toroid = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.1, 16, 32), toroidMat);
+      toroid.rotation.x = Math.PI / 2;
+      toroid.position.y = 1.1;
+      this.teslaMesh.add(toroid);
+      
+      this.teslaMesh.visible = false;
+      this.scene.add(this.teslaMesh);
+  }
+
+  private playRadioMessage(msg: string) {
+      this.currentRadioMessage = msg;
+      this.radioMessageTimer = 8.0; // Play for 8 seconds
+      
+      if (this.radioMesh && this.radioMesh.children.length > 4) {
+          const mat = this.radioMesh.children[4] as THREE.Mesh;
+          if(mat.material instanceof THREE.MeshBasicMaterial) {
+              mat.material.color.setHex(0x00ff00); // highlight
+              mat.material.opacity = 1.0;
+          }
+      }
+      if (this.radioAudio) {
+          this.radioAudio.setVolume(1.0);
+          if (this.radioAudio.isPlaying) this.radioAudio.stop();
+          this.radioAudio.play();
+      }
+  }
+
   private animate() {
       if (!this.isRunning || this.isDisposed) return;
       this.animationId = requestAnimationFrame(() => this.animate());
 
-      const delta = this.clock.getDelta();
+      const delta = Math.min(this.clock.getDelta(), 0.1); // Cap delta to prevent teleportation lags
       const now = this.clock.getElapsedTime();
       
       this.windUniforms.time.value = now;
 
-      if (this.phase !== GamePhase.DAY && Date.now() - this.monitorUpdateTimer > 50) {
+      if (this.phase !== GamePhase.DAY && Date.now() - this.monitorUpdateTimer > 100) {
         this.monitorUpdateTimer = Date.now();
         this.updateMonitor();
       }
 
+      // Physics stepping
       this.world.step(1/60, delta, 3);
       
-      if (this.trauma > 0) {
-          this.trauma = Math.max(0, this.trauma - delta * 0.5);
-          const shake = this.trauma * this.trauma;
-          const shakeX = (Math.random() - 0.5) * shake * 0.1;
-          const shakeY = (Math.random() - 0.5) * shake * 0.1;
-          const shakeZ = (Math.random() - 0.5) * shake * 0.1;
-          
-          const shookEuler = this.euler.clone();
-          shookEuler.x += shakeX;
-          shookEuler.y += shakeY;
-          shookEuler.z += shakeZ;
-          this.camera.quaternion.setFromEuler(shookEuler);
-      } else {
-          this.camera.quaternion.setFromEuler(this.euler);
-      }
+      this.camera.quaternion.setFromEuler(this.euler);
 
       const breathIntensity = (100 - this.stamina) / 100.0;
       this.soundManager.updateBreathing(breathIntensity);
-      this.soundManager.updateHeartbeat(this.stress);
       
       if (this.dashCooldown > 0) this.dashCooldown -= delta;
       if (this.isDashing) {
@@ -2259,14 +2757,79 @@ export class GameEngine {
       }
 
       this.updateMovement(delta);
+      this.updateTutorial(delta);
 
-      if (this.phase === GamePhase.NIGHT) {
+      const isNight = this.phase === GamePhase.NIGHT;
+      const isNightOrTut = isNight || this.isTutorial;
+
+      if (isNightOrTut) {
+          if (this.radioMessageTimer > 0) {
+              this.radioMessageTimer -= delta;
+              if (this.radioMessageTimer <= 0) {
+                  this.currentRadioMessage = null;
+                  if (this.radioMesh && this.radioMesh.children.length > 4) {
+                      const mat = this.radioMesh.children[4] as THREE.Mesh;
+                      if(mat.material instanceof THREE.MeshBasicMaterial) {
+                          mat.material.color.setHex(0x002200); 
+                          mat.material.opacity = 0.5;
+                      }
+                  }
+                  if (this.radioAudio && this.radioAudio.isPlaying) {
+                      this.radioAudio.stop();
+                  }
+              }
+          }
+
+          // Global floor clamp for Enemies
+          for (const enemy of this.enemies) {
+              if (enemy.isDead) continue;
+              // Floor clamp
+              if (enemy.mesh.position.y < 0) enemy.mesh.position.y = 0;
+          }
+
+          if (this.wave >= 4 && !this.isGeneratorDisabled && !this.isBlackout) {
+              this.blackoutTimer -= delta;
+              if (this.blackoutTimer <= 0 && Math.random() < 0.05 * delta) {
+                  this.isBlackout = true;
+                  this.blackoutDuration = 2 + Math.random() * 5;
+                  this.soundManager.playScreamer(); 
+                  if (!this.isBloodMoon) this.sunLight.intensity = 0;
+                  this.boothLight.intensity = 0;
+                  this.flashlight.flicker(this.blackoutDuration);
+              }
+          }
+
+          if (this.isBlackout) {
+              this.blackoutDuration -= delta;
+              if (this.blackoutDuration <= 0) {
+                  this.isBlackout = false;
+                  this.blackoutTimer = 30 + Math.random() * 60; 
+                  this.sunLight.intensity = 0.15;
+                  this.boothLight.intensity = 20.0;
+              }
+          }
+          
+          if (!this.isBlackout) {
+              const baseDist = 45;
+              const targetDist = Math.max(15, baseDist - (this.wave * 1.5));
+              this.boothLight.distance += (targetDist - this.boothLight.distance) * delta;
+          }
+
           const windX = Math.sin(now * 0.5) * 0.5;
           const windZ = Math.cos(now * 0.3) * 0.5;
           
           this.rainSystem.update(delta, this.camera.position, windX, windZ);
           this.sporeSystem.update(delta);
           
+          // Industrial Light Flickering
+          if (this.boothLightFixture && !this.isBlackout && !this.isGeneratorDisabled) {
+              const flicker = Math.random() > 0.98 ? 0.2 : 0.6;
+              const flicker2 = 0.5 + Math.sin(now * 20) * 0.1;
+              if (this.boothLightFixture.material instanceof THREE.MeshStandardMaterial) {
+                  this.boothLightFixture.material.emissiveIntensity = flicker * flicker2;
+              }
+          }
+
           this.lightningTimer -= delta;
           if (this.lightningTimer <= 0) {
              if (Math.random() > 0.99) {
@@ -2285,6 +2848,20 @@ export class GameEngine {
                   this.fog.color.setHex(this.isBloodMoon ? COLORS.BLOOD_MOON : COLORS.FOG);
                   this.scene.background = new THREE.Color(this.isBloodMoon ? COLORS.BLOOD_MOON : COLORS.SKY_NIGHT);
               }
+          }
+      }
+
+      // Update Damage Texts - Optimized visibility toggle instead of dispose
+      for (let i = this.damageTexts.length - 1; i >= 0; i--) {
+          const dt = this.damageTexts[i];
+          dt.life -= delta;
+          if (dt.life <= 0) {
+              dt.sprite.visible = false;
+              this.damageTexts.splice(i, 1);
+          } else {
+              dt.sprite.position.add(this.tempVec3.copy(dt.velocity).multiplyScalar(delta));
+              dt.velocity.y -= 5.0 * delta; // Gravity
+              dt.sprite.material.opacity = dt.life; // Fade out
           }
       }
 
@@ -2312,40 +2889,141 @@ export class GameEngine {
       this.flashlight.update(delta, isRefilling && !this.isGeneratorDisabled);
 
       const playerPos = this.camera.position;
-      const lightDir = new THREE.Vector3();
+      const lightDir = this.tempVec3.set(0,0,0);
       this.camera.getWorldDirection(lightDir);
       
       this.raycaster.camera = this.camera;
       const targetPos = this.isGeneratorDisabled ? this.camera.position : new THREE.Vector3(0, 0, 0);
+      const genPos = new THREE.Vector3(-1.4, 0.2, -1.4);
+      
+      const doorNode = new THREE.Vector3(0, 0, -3.5);
+      const entranceNode = new THREE.Vector3(0, 0, -2.1);
+      const centerNode = new THREE.Vector3(0, 0, 0); // Mandatory nav point before core
+      const stagingNodeFront = new THREE.Vector3(0, 0, -10.0);
 
       for (let i = this.enemies.length - 1; i >= 0; i--) {
           const enemy = this.enemies[i];
+          
+          let currentEnemyTarget = this.isGeneratorDisabled ? this.camera.position : genPos;
+          const ex = enemy.mesh.position.x;
+          const ez = enemy.mesh.position.z;
+
+          // Sequential pathing logic for enemies hitting the generator
+      if (!this.isGeneratorDisabled && enemy.type !== EnemyType.DRAINER) {
+          const isInside = Math.abs(ex) <= 1.9 && ez >= -1.9 && ez <= 1.9;
+
+          if (!isInside) {
+              if (ez > 2.0 && Math.abs(ex) < 3.0) {
+                  // Right behind the booth. Move to the sides first.
+                  currentEnemyTarget = ex < 0 ? new THREE.Vector3(-4.0, 0, 2.5) : new THREE.Vector3(4.0, 0, 2.5);
+              } else if (Math.abs(ex) > 1.2 && ez > -2.1) {
+                  // On the left/right sides. Go to the front corners to clear the walls.
+                  currentEnemyTarget = ex < 0 ? new THREE.Vector3(-3.0, 0, -3.5) : new THREE.Vector3(3.0, 0, -3.5);
+              } else if (Math.abs(ex) > 0.8 && ez <= -2.1) {
+                  // In the front area, but too far left or right (would hit the front panels). Go to doorLine.
+                  currentEnemyTarget = new THREE.Vector3(0, 0, -3.5);
+              } else {
+                  // Directly in front of the door line. Enter.
+                  currentEnemyTarget = new THREE.Vector3(0, 0, -2.1);
+              }
+          } else {
+              // Enforce stepping into the center before reaching the generator 
+              // to prevent clipping the side walls while turning.
+              if (ez < -0.8 && Math.abs(ex) < 1.0) {
+                  currentEnemyTarget = new THREE.Vector3(0, 0, 0);
+              } else {
+                  currentEnemyTarget = genPos;
+              }
+          }
+      }
+
+          // SLIDING COLLISION (Improved)
+          // Front Wall Snap (Prevent clipping from outside)
+          if (ez < -1.85 && ez > -2.1 && Math.abs(ex) > 1.0 && Math.abs(ex) < 2.1) {
+              enemy.mesh.position.z = ez < -2.0 ? -2.15 : -1.82;
+          }
+          // Back Wall Snap
+          if (ez > 1.85 && ez < 2.15 && Math.abs(ex) < 2.1) {
+              enemy.mesh.position.z = ez < 2.0 ? 1.82 : 2.18;
+          }
+          // Side Walls Snap
+          if (Math.abs(ex) > 1.85 && Math.abs(ex) < 2.15 && Math.abs(ez) < 2.1) {
+              const dir = ex < 0 ? -1 : 1;
+              enemy.mesh.position.x = ex * dir < 1.95 ? 1.82 * dir : 2.18 * dir;
+          }
+
           if (enemy.isDead) {
               if (enemy.isFullyDissolved) {
                  this.scene.remove(enemy.mesh);
                  this.enemies.splice(i, 1);
                  if (this.phase === GamePhase.NIGHT) {
-                     this.credits += 15;
+                     this.credits += 35; // Increased from 25 to make game easier
                      this.totalKills++;
                      this.killsByType[enemy.type] = (this.killsByType[enemy.type] || 0) + 1;
                      
-                     // Loot drop chance
-                     if (Math.random() < 0.35) {
+                     // Loot drop chance increased from 0.35 to 0.5 to make game easier
+                     if (Math.random() < 0.5) {
                          const types: ('battery' | 'health' | 'credits')[] = ['battery', 'health', 'credits'];
                          const type = types[Math.floor(Math.random() * types.length)];
-                         const value = type === 'credits' ? 50 : 20;
+                         const value = type === 'credits' ? 100 : 35; // Increased credits and battery/hp restores
                          const loot = new LootDrop(enemy.mesh.position, type, value);
                          this.scene.add(loot.mesh);
                          this.activeLoot.push(loot);
                      }
                  }
               } else {
-                  enemy.update(delta, targetPos);
+                  enemy.update(delta, currentEnemyTarget);
               }
               continue;
           }
 
-          const attackResult = enemy.update(delta, targetPos);
+          const attackResult = enemy.update(delta, currentEnemyTarget);
+          
+          if (attackResult === 'shriek') {
+               this.addTrauma(0.4);
+               this.soundManager.playScreamer(); 
+               if (enemy.mesh.position.distanceTo(this.camera.position) < 8) {
+                   this.generatorHp -= 5;
+               }
+          } else if (attackResult === 'spawn') {
+               const minion = new NormalEnemy();
+               minion.mesh.position.copy(enemy.mesh.position).add(new THREE.Vector3((Math.random()-0.5)*5, 0, (Math.random()-0.5)*5));
+               this.enemies.push(minion);
+               this.scene.add(minion.mesh);
+          } else if (attackResult === 'stomp') {
+               this.addTrauma(0.6);
+               this.soundManager.playThunder(); // loud boom for stomp
+               // Massive screen shake from stomp
+               this.velocity.y += 2.0; 
+               if (this.generatorHp > 0) {
+                   this.generatorHp -= 5; // Reduced stomp damage per user request
+               }
+          }
+
+          if (enemy.type === EnemyType.SPITTER) {
+              const spitter = enemy as any;
+              spitter.lastShot += delta;
+              if (spitter.lastShot > 3.0 && !spitter.isDead && !this.isGeneratorDisabled) {
+                  // Check line of sight to player
+                  this.raycaster.set(spitter.mesh.position, this.tempVec3Alt.subVectors(this.camera.position, spitter.mesh.position).normalize());
+                  const hits = this.raycaster.intersectObjects(this.occlusionObjects, true);
+                  let obstructed = false;
+                  for (const hit of hits) {
+                      if (hit.distance < spitter.mesh.position.distanceTo(this.camera.position)) {
+                          obstructed = true;
+                          break;
+                      }
+                  }
+                  if (!obstructed) {
+                      spitter.lastShot = 0;
+                      const dir = new THREE.Vector3().subVectors(this.camera.position, spitter.mesh.position).normalize();
+                      const proj = new EnemyProjectile(spitter.mesh.position.clone().add(new THREE.Vector3(0, 1, 0)), dir);
+                      this.scene.add(proj.mesh);
+                      this.activeProjectiles.push(proj);
+                      this.soundManager.playSpitSound(this.scene, spitter.mesh.position);
+                  }
+              }
+          }
 
           if (this.flashlight.isLightOn()) {
               const toEnemy = new THREE.Vector3().subVectors(enemy.mesh.position, this.camera.position).normalize();
@@ -2361,6 +3039,8 @@ export class GameEngine {
                            const mat = (hit.object as THREE.Mesh).material as any;
                            if (mat && mat.transparent && mat.opacity < 0.5) continue;
                            
+                           if (Math.abs(playerPos.x) < 2.5 && Math.abs(playerPos.z) < 2.5 && (hit.object.parent === this.boothGroup || hit.object === this.boothGroup)) continue;
+
                            obstructed = true; 
                            break;
                        }
@@ -2384,24 +3064,45 @@ export class GameEngine {
 
                       if (enemy.type === EnemyType.FAST) dmg *= 2.0; 
                       if (enemy.type === EnemyType.TANK) dmg *= 0.5; 
-                      const died = enemy.takeDamage(dmg, enemy.mesh.position, new THREE.Vector3(0,1,0), this.burnTexture);
+                      const { died, damage, isCritical } = enemy.takeDamage(dmg, enemy.mesh.position, new THREE.Vector3(0,1,0), this.burnTexture);
+                      if (damage > 0) this.spawnDamageText(damage, enemy.mesh.position, isCritical);
                       if (died) {
-                          this.soundManager.playHitMarker();
-                          this.hitMarkerTrigger++;
+                          if (enemy.isHallucination) {
+                              this.soundManager.playHallucinationVanish();
+                              this.addTrauma(0.2); // Taking out a hallucination still stresses you
+                          } else {
+                              this.soundManager.playHitMarker();
+                              this.hitMarkerTrigger++;
+                          }
                       }
                   }
               }
           }
 
-          if (enemy.mesh.position.distanceTo(this.camera.position) < 1.5) {
-               this.soundManager.playScreamer(); 
-               this.triggerDeath();
+          const killRadius = 1.0 + (enemy.mesh.scale.x * 0.5);
+          if (enemy.mesh.position.distanceTo(this.camera.position) < killRadius) {
+               if (!this.isTutorial) {
+                   if (enemy.isHallucination) {
+                       enemy.takeDamage(9999); // Instantly kill hallucination
+                       this.soundManager.playHallucinationVanish();
+                       this.addTrauma(0.5); // Big stress spike
+                   } else {
+                       this.soundManager.playScreamer(); 
+                       this.triggerDeath();
+                   }
+               }
           }
           
-          if (enemy.mesh.position.distanceTo(new THREE.Vector3(0,0,0)) < 3.0) {
-              if (this.generatorHp > 0) {
-                  this.generatorHp -= 5 * delta;
-                  this.addTrauma(0.2 * delta);
+          const genRadius = 2.0 + (enemy.mesh.scale.x * 0.5); // Increased radius for reliable attack
+          const distToGen = enemy.mesh.position.distanceTo(genPos);
+          const enemyInBooth = Math.abs(ex) < 2.0 && ez > -2.0 && ez < 2.0;
+
+          if (distToGen < genRadius && enemyInBooth) {
+              if (this.generatorHp > 0 && !this.isTutorial) {
+                  let dps = 5;
+                  if (enemy.type === EnemyType.TANK || enemy.type === EnemyType.LEVIATHAN || enemy.type === EnemyType.FOREST_HEART) dps = 20;
+                  this.generatorHp -= dps * delta;
+                  this.addTrauma(0.5 * delta);
                   if (this.generatorHp <= 0) {
                       this.isGeneratorDisabled = true;
                       this.generatorHp = 0;
@@ -2437,7 +3138,8 @@ export class GameEngine {
                         
                         this.turretCooldown = fireRate;
                         this.turretAmmo--;
-                        const died = this.turretTarget.takeDamage(damage);
+                        const { died, damage: dmgDealt, isCritical } = this.turretTarget.takeDamage(damage);
+                        if (dmgDealt > 0) this.spawnDamageText(dmgDealt, this.turretTarget.mesh.position, isCritical);
                         if (died) {
                             this.soundManager.playHitMarker();
                             this.hitMarkerTrigger++;
@@ -2455,10 +3157,70 @@ export class GameEngine {
            }
       }
       
+      if (this.teslaMesh && this.teslaLevel > 0 && !this.isGeneratorDisabled) {
+          if (this.teslaCooldown > 0) this.teslaCooldown -= delta;
+          if (this.teslaCooldown <= 0) {
+              let hitAny = false;
+              const range = 5 + (this.teslaLevel * 2);
+              const dmg = 15 + (this.teslaLevel * 10);
+              
+              for (const e of this.enemies) {
+                  if (e.isDead) continue;
+                  if (e.mesh.position.distanceTo(this.teslaMesh.position) < range) {
+                      const { died, damage: dmgDealt, isCritical } = e.takeDamage(dmg);
+                      if (dmgDealt > 0) this.spawnDamageText(dmgDealt, e.mesh.position, isCritical);
+                      e.stun(1.0); // Stun for 1 second
+                      
+                      // Draw lightning
+                      const points = [this.teslaMesh.position.clone().add(new THREE.Vector3(0, 1.1, 0)), e.mesh.position.clone().add(new THREE.Vector3(0, 1, 0))];
+                      const geo = new THREE.BufferGeometry().setFromPoints(points);
+                      const mat = new THREE.LineBasicMaterial({color: 0xaaccff, linewidth: 2});
+                      const line = new THREE.Line(geo, mat);
+                      this.scene.add(line);
+                      setTimeout(() => this.scene.remove(line), 100);
+                      
+                      this.soundManager.playTeslaZap(this.scene, this.teslaMesh.position);
+                      hitAny = true;
+                  }
+              }
+              if (hitAny) {
+                  this.teslaCooldown = Math.max(1.0, 3.0 - (this.teslaLevel * 0.5));
+              }
+          }
+      }
+      
       for (let i = this.activeFlares.length - 1; i >= 0; i--) {
           const f = this.activeFlares[i];
           f.update(delta, this.scene);
           if (f.life <= 0) this.activeFlares.splice(i, 1);
+      }
+
+      for (let i = this.activeProjectiles.length - 1; i >= 0; i--) {
+          const p = this.activeProjectiles[i];
+          p.update(delta);
+          
+          // Check collision with player
+          if (p.mesh.position.distanceTo(this.camera.position) < 1.0) {
+              this.addTrauma(0.5);
+              this.soundManager.playScreamer();
+              // Small damage to generator if hit
+              if (this.generatorHp > 0) {
+                  this.generatorHp -= p.damage;
+                  if (this.generatorHp <= 0) {
+                      this.isGeneratorDisabled = true;
+                      this.generatorHp = 0;
+                      this.flashlight.turnOff();
+                  }
+              }
+              this.scene.remove(p.mesh);
+              this.activeProjectiles.splice(i, 1);
+              continue;
+          }
+          
+          if (p.life <= 0) {
+              this.scene.remove(p.mesh);
+              this.activeProjectiles.splice(i, 1);
+          }
       }
 
       for (let i = this.activeMines.length - 1; i >= 0; i--) {
@@ -2478,7 +3240,8 @@ export class GameEngine {
                       let anyDied = false;
                       for (const e of this.enemies) {
                           if (!e.isDead && e.mesh.position.distanceTo(m.mesh.position) < m.radius * 1.5) {
-                              const died = e.takeDamage(m.damage, e.mesh.position, new THREE.Vector3(0,1,0), this.burnTexture);
+                              const { died, damage, isCritical } = e.takeDamage(m.damage, e.mesh.position, new THREE.Vector3(0,1,0), this.burnTexture);
+                              if (damage > 0) this.spawnDamageText(damage, e.mesh.position, isCritical);
                               if (died) {
                                   anyDied = true;
                                   this.hitMarkerTrigger++;
@@ -2495,11 +3258,32 @@ export class GameEngine {
 
       this.sparkSystem.update(delta);
       this.updateGeneratorScreen();
+      
+      const hpRatio = this.generatorHp / this.maxGeneratorHp;
+      this.soundManager.updateGeneratorSound(hpRatio, this.isGeneratorDisabled);
+
+      // Fan animation
+      if (this.fanMesh && this.fanMesh.userData.blades) {
+          if (this.isFanOn && !this.isGeneratorDisabled) {
+              this.fanSpeed = Math.min(this.fanSpeed + delta * 5, 20);
+          } else {
+              this.fanSpeed = Math.max(this.fanSpeed - delta * 2, 0);
+          }
+          this.fanMesh.userData.blades.rotation.z += this.fanSpeed * delta;
+      }
 
       // Generator light flickering based on HP
       if (this.isGeneratorDisabled) {
           this.boothLight.intensity = 0;
+          this.emergencyLight.intensity = (Math.sin(now * 8) > 0) ? 15 : 0;
+          
+          this.sparkTimer += delta;
+          if (this.sparkTimer > 0.5) {
+              this.sparkSystem.emit(this.generatorGroup.position.clone().add(new THREE.Vector3(0, 1, 0)), 5);
+              this.sparkTimer = 0;
+          }
       } else {
+          this.emergencyLight.intensity = 0;
           const hpRatio = this.generatorHp / this.maxGeneratorHp;
           if (hpRatio < 0.5) {
               const flickerChance = (0.5 - hpRatio) * 2; 
@@ -2507,6 +3291,12 @@ export class GameEngine {
                   this.boothLight.intensity = Math.random() * 5;
               } else {
                   this.boothLight.intensity = 20.0;
+              }
+              
+              this.sparkTimer += delta;
+              if (this.sparkTimer > 1.5) {
+                  this.sparkSystem.emit(this.generatorGroup.position.clone().add(new THREE.Vector3(0, 1, 0)), 2);
+                  this.sparkTimer = 0;
               }
           } else {
               this.boothLight.intensity = 20.0;
@@ -2547,60 +3337,55 @@ export class GameEngine {
       this.nearestEnemyDistance = minEnemyDist === Infinity ? null : minEnemyDist;
 
       if (this.phase === GamePhase.NIGHT) {
-          if (enemyNear) this.stress += delta * 0.1;
-          if (this.isGeneratorDisabled) this.stress += delta * 0.15;
-          
-          const distToGen = this.camera.position.distanceTo(new THREE.Vector3(0,0,0));
-          if (distToGen < GAME_CONFIG.SAFE_ZONE_RADIUS && !this.isGeneratorDisabled) {
-              this.stress -= delta * 0.2;
+          if (this.isBloodMoon && this.generatorHp > 0 && !this.isGeneratorDisabled) {
+              // Ambient drain from the anomalous environment. Made easier per user request
+              this.generatorHp -= delta * 0.2;
+              if (this.generatorHp <= 0) {
+                  this.generatorHp = 0;
+                  this.isGeneratorDisabled = true;
+                  this.flashlight.turnOff();
+                  this.soundManager.playScreamer();
+              }
           }
-      } else {
-          this.stress -= delta * 0.5;
       }
-      this.stress = Math.max(0, Math.min(1, this.stress));
       
-      // Trauma is more permanent, stress is immediate
-      this.trauma = Math.max(0, this.stress * 0.5 + (this.trauma * 0.5));
-      
-      // Update Post-processing based on trauma
-      if (this.aberrationPass) {
-          this.aberrationPass.material.uniforms.uIntensity.value = this.trauma * 2.0;
-      }
+      // Update Post-processing 
       if (this.bloomPass) {
-          this.bloomPass.strength = 1.5 + this.trauma * 2.0;
+          const pulse = Math.sin(now * 5) * 0.5 + 0.5;
+          this.bloomPass.strength = 1.5;
       }
 
-      // Check if aiming at enemy
+      // Check if aiming at enemy - OPTIMIZED: Only raycast against existing enemies
       let isAimingEnemy = false;
-      this.raycaster.setFromCamera(new THREE.Vector2(0,0), this.camera);
-      const intersects = this.raycaster.intersectObjects(this.scene.children, true);
-      for(const hit of intersects) {
-          if (hit.distance > 20) break;
-          let obj = hit.object;
-          while(obj) {
-              if (obj.userData && obj.userData.isEnemy) {
-                  isAimingEnemy = true;
-                  break;
-              }
-              obj = obj.parent as THREE.Object3D;
+      if (this.enemies.length > 0) {
+          this.raycaster.setFromCamera(this.tempVec2.set(0,0), this.camera);
+          const enemyMeshes = this.enemies.map(e => e.mesh);
+          const intersects = this.raycaster.intersectObjects(enemyMeshes, true);
+          if (intersects.length > 0 && intersects[0].distance < 20) {
+              isAimingEnemy = true;
           }
-          if (isAimingEnemy) break;
       }
 
       this.composer.render();
       
-      this.onStatsUpdate(
-          this.flashlight.getBattery(), this.generatorHp, this.wave, this.credits, 
-          this.isGeneratorDisabled, this.restartProgress, this.totalKills, 
-          this.killsByType, this.turretAmmo, this.stamina,
-          this.flashlight.getOverchargeCooldown(),
-          this.dashCooldown,
-          this.hitMarkerTrigger,
-          isAimingEnemy,
-          this.isBloodMoon,
-          this.nearestEnemyDistance,
-          this.flashlight.getMode()
-      );
+      // OPTIMIZED stats update: throttle to 20fps to prevent UI-driven lag
+      if (Date.now() - this.statsUpdateTimer > 50) {
+          this.statsUpdateTimer = Date.now();
+          this.onStatsUpdate(
+              this.flashlight.getBattery(), this.generatorHp, this.wave, this.credits, 
+              this.isGeneratorDisabled, this.restartProgress, this.totalKills, 
+              this.killsByType, this.turretAmmo, this.stamina,
+              this.flashlight.getOverchargeCooldown(),
+              this.dashCooldown,
+              this.hitMarkerTrigger,
+              isAimingEnemy,
+              this.isBloodMoon,
+              this.nearestEnemyDistance,
+              this.flashlight.getMode(),
+              this.tutorialText,
+              this.currentRadioMessage
+          );
+      }
       
       if (this.phase === GamePhase.NIGHT && this.enemies.length === 0 && this.wave > 0) {
           this.endNight();

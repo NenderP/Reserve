@@ -6,7 +6,7 @@ import { GamePhase, SaveData, FlashlightMode } from '../types';
 
 interface GameCanvasProps {
   loadingManager: THREE.LoadingManager;
-  onStatsUpdate: (bat: number, hp: number, wave: number, credits: number, genDisabled: boolean, restartProgress: number, totalKills: number, killsByType: Record<string, number>, ammo: number, stamina: number, overcharge: number, dash: number, hitMarker: number, isAimingEnemy: boolean, isBloodMoon: boolean, nearestDist: number | null, fMode: FlashlightMode) => void;
+  onStatsUpdate: (bat: number, hp: number, wave: number, credits: number, genDisabled: boolean, restartProgress: number, totalKills: number, killsByType: Record<string, number>, ammo: number, stamina: number, overcharge: number, dash: number, hitMarker: number, isAimingEnemy: boolean, isBloodMoon: boolean, nearestDist: number | null, fMode: FlashlightMode, tText: string | null, radioMsg: string | null) => void;
   onPhaseChange: (phase: GamePhase) => void;
   onInteract: (target: string) => void;
   onHover: (isHovering: boolean, text: string) => void;

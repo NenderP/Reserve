@@ -18,17 +18,17 @@ export const COLORS = {
 };
 
 export const GAME_CONFIG = {
-  MAX_BATTERY: 100,
-  BATTERY_DRAIN_RATE: 8.0,
-  BATTERY_RECHARGE_RATE: 25.0,
-  GENERATOR_MAX_HEALTH: 100,
-  SAFE_ZONE_RADIUS: 3.5,
-  PLAYER_SPEED: 2.2, // Reduced from 2.5
-  PLAYER_RUN_SPEED: 3.8, // Reduced from 4.5
-  MAX_FLARES: 5,
-  FLARE_DURATION: 12.0,
-  FLARE_RADIUS: 8.0,
-  FLARE_COST: 100
+  MAX_BATTERY: 150,
+  BATTERY_DRAIN_RATE: 4.5,
+  BATTERY_RECHARGE_RATE: 45.0,
+  GENERATOR_MAX_HEALTH: 150,
+  SAFE_ZONE_RADIUS: 4.0,
+  PLAYER_SPEED: 2.5, 
+  PLAYER_RUN_SPEED: 4.5,
+  MAX_FLARES: 8,
+  FLARE_DURATION: 15.0,
+  FLARE_RADIUS: 9.0,
+  FLARE_COST: 60
 };
 
 export const LOADING_TIPS = [
@@ -64,7 +64,7 @@ export const INITIAL_UPGRADES = [
     id: 'focus_lens', 
     name: 'Focus Lens', 
     description: 'Полимеризованная линза. Усиливает ожог сетчатки врагов.', 
-    cost: 80, 
+    cost: 60, 
     level: 1, 
     maxLevel: 5,
     effect: (val: number) => val 
@@ -73,7 +73,7 @@ export const INITIAL_UPGRADES = [
     id: 'gen_reinforce', 
     name: 'Reinforced Generator', 
     description: 'Титановые пластины для корпуса генератора.', 
-    cost: 120, 
+    cost: 80, 
     level: 1, 
     maxLevel: 3,
     effect: (val: number) => val 
@@ -91,16 +91,16 @@ export const INITIAL_UPGRADES = [
     id: 'flare_pack',
     name: 'UV Flare Pack (+1)',
     description: 'Комплект аварийных флаеров. Нажмите [G] для использования.',
-    cost: 100, // Rebuyable
+    cost: 40, 
     level: 0,
-    maxLevel: 99, // Infinite rebuy
+    maxLevel: 99, 
     effect: (val: number) => val
   },
   {
     id: 'mine_pack',
     name: 'Proximity Mine (+1)',
     description: 'Умная мина. Срабатывает при приближении врага. Нажмите [V] для установки.',
-    cost: 150,
+    cost: 60,
     level: 0,
     maxLevel: 99,
     effect: (val: number) => val
@@ -108,8 +108,8 @@ export const INITIAL_UPGRADES = [
   {
     id: 'turret_build',
     name: 'Sentry Turret System',
-    description: 'Установка автоматической турели. Уровень 1: крайне слабая и медленная. Улучшайте для повышения урона и скорости.',
-    cost: 400, // Increased cost
+    description: 'Установка автоматической турели.',
+    cost: 300, 
     level: 0,
     maxLevel: 5,
     effect: (val: number) => val
@@ -118,7 +118,7 @@ export const INITIAL_UPGRADES = [
     id: 'turret_ammo',
     name: 'Sentry Ammo Box',
     description: 'Коробка патронов для автоматической турели (100 шт).',
-    cost: 100, // Reduced cost
+    cost: 50, 
     level: 0,
     maxLevel: 99,
     effect: (val: number) => val
@@ -126,8 +126,8 @@ export const INITIAL_UPGRADES = [
   {
     id: 'dash_boots',
     name: 'Kinetic Boosters',
-    description: 'Позволяет совершать быстрый рывок на [Space]. Расходует много выносливости.',
-    cost: 250,
+    description: 'Позволяет совершать быстрый рывок на [Space].',
+    cost: 100,
     level: 0,
     maxLevel: 3,
     effect: (val: number) => val
@@ -135,17 +135,44 @@ export const INITIAL_UPGRADES = [
   {
     id: 'adrenaline',
     name: 'Adrenaline Shot',
-    description: 'Мгновенно восстанавливает выносливость и увеличивает ее регенерацию.',
-    cost: 180,
+    description: 'Ускоряет регенерацию выносливости.',
+    cost: 80,
     level: 0,
     maxLevel: 3,
     effect: (val: number) => val
   },
   {
+    id: 'flashlight_uv',
+    name: 'UV Flashlight Mode',
+    description: 'Ультрафиолетовый режим. Эффективен против Фантомов.',
+    cost: 200,
+    level: 0,
+    maxLevel: 1,
+    effect: (val: number) => val
+  },
+  {
+    id: 'flashlight_strobe',
+    name: 'Strobe Flashlight Mode',
+    description: 'Стробоскопический режим. Оглушает врагов.',
+    cost: 250,
+    level: 0,
+    maxLevel: 1,
+    effect: (val: number) => val
+  },
+  {
     id: 'advanced_optics',
     name: 'Advanced Optics',
-    description: 'Улучшенная фокусировка луча. Увеличивает дальность и урон фонаря.',
-    cost: 300,
+    description: 'Улучшенная фокусировка луча.',
+    cost: 150,
+    level: 0,
+    maxLevel: 3,
+    effect: (val: number) => val
+  },
+  {
+    id: 'tesla_coil',
+    name: 'Tesla Coil Defense',
+    description: 'Установка катушки Теслы на крышу будки.',
+    cost: 350,
     level: 0,
     maxLevel: 3,
     effect: (val: number) => val

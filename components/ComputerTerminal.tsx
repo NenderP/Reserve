@@ -51,8 +51,12 @@ const ComputerTerminal = ({
       if (condition.type === 'wave') return wave >= (condition.value as number);
       if (condition.type === 'kills') return totalKills >= (condition.value as number);
       if (condition.type === 'boss_kill') {
+          if (condition.value === 'Behemoth' || condition.value === 'Leviathan') {
+              return !!killsByType['Leviathan'];
+          }
           return wave >= 6; 
       }
+      if (condition.type === 'achievement') return true; 
       return false;
   }
 

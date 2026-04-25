@@ -7,6 +7,7 @@ export enum FlashlightMode {
 
 export enum GamePhase {
   MENU = 'MENU',
+  TUTORIAL = 'TUTORIAL',
   NIGHT = 'NIGHT',
   DAY = 'DAY',
   GAME_OVER = 'GAME_OVER',
@@ -20,7 +21,11 @@ export enum EnemyType {
   SPLITTER = 'Splitter',
   GLITCHER = 'Glitcher',
   DRAINER = 'Drainer',
-  PHANTOM = 'Phantom'
+  PHANTOM = 'Phantom',
+  SPITTER = 'Spitter',
+  SHRIEKER = 'Shrieker',
+  FOREST_HEART = 'ForestHeart',
+  LEVIATHAN = 'Leviathan'
 }
 
 export interface UnlockCondition {

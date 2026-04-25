@@ -2,7 +2,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
 import GameCanvas from './components/GameCanvas';
-import UIOverlay from './components/UIOverlay';
+import GameUI from './components/GameUI';
 import ComputerTerminal from './components/ComputerTerminal';
 import MainMenu from './components/MainMenu';
 import LoadingScreen from './components/LoadingScreen';
@@ -38,6 +38,8 @@ function App() {
   const [isBloodMoon, setIsBloodMoon] = useState(false);
   const [nearestEnemyDistance, setNearestEnemyDistance] = useState<number | null>(null);
   const [flashlightMode, setFlashlightMode] = useState<FlashlightMode>(FlashlightMode.NORMAL);
+  const [tutorialText, setTutorialText] = useState<string | null>(null);
+  const [radioMessage, setRadioMessage] = useState<string | null>(null);
   const prevKillsRef = useRef(0);
   
   // Save System
@@ -132,7 +134,9 @@ function App() {
       aimingEnemy?: boolean,
       bloodMoon?: boolean,
       nearestDist?: number | null,
-      fMode?: FlashlightMode
+      fMode?: FlashlightMode,
+      tText?: string | null,
+      rMsg?: string | null
   ) => {
     setBattery(newBat);
     setHp(newHp);
@@ -150,6 +154,8 @@ function App() {
     if (bloodMoon !== undefined) setIsBloodMoon(bloodMoon);
     if (nearestDist !== undefined) setNearestEnemyDistance(nearestDist);
     if (fMode !== undefined) setFlashlightMode(fMode);
+    if (tText !== undefined) setTutorialText(tText);
+    if (rMsg !== undefined) setRadioMessage(rMsg);
     
     if (hitMarker && hitMarker > hitMarkerTrigger) {
         setHitMarkerTrigger(hitMarker);
@@ -185,6 +191,9 @@ function App() {
       setUpgrades(INITIAL_UPGRADES);
       setBattery(100);
       setHp(100);
+      setWave(0);
+      setCredits(0);
+      setTotalKills(0);
       setKillsByType({});
       setFlares(0);
       setAmmo(200);
@@ -194,6 +203,28 @@ function App() {
       if (gameEngineRef.current) {
           gameEngineRef.current.resetGame(); 
           gameEngineRef.current.startNight();
+      }
+  };
+
+  const handleStartTutorial = () => {
+      SaveService.clearSave(); 
+      setInitialSaveData(null);
+      
+      setUpgrades(INITIAL_UPGRADES);
+      setBattery(100);
+      setHp(100);
+      setWave(0);
+      setCredits(0);
+      setTotalKills(0);
+      setKillsByType({});
+      setFlares(0);
+      setAmmo(200);
+      setStamina(100);
+      setOverchargeCooldown(0);
+      
+      if (gameEngineRef.current) {
+          gameEngineRef.current.resetGame();
+          gameEngineRef.current.startTutorial();
       }
   };
 
@@ -253,6 +284,18 @@ function App() {
                       ...newUps[idx],
                       level: newUps[idx].level + 1
                   };
+              } else if (id === 'flashlight_uv') {
+                  (gameEngineRef.current as any).flashlight.unlockMode(FlashlightMode.UV);
+                  newUps[idx] = {
+                      ...newUps[idx],
+                      level: newUps[idx].level + 1
+                  };
+              } else if (id === 'flashlight_strobe') {
+                  (gameEngineRef.current as any).flashlight.unlockMode(FlashlightMode.STROBE);
+                  newUps[idx] = {
+                      ...newUps[idx],
+                      level: newUps[idx].level + 1
+                  };
               } else {
                   newUps[idx] = {
                       ...newUps[idx],
@@ -304,24 +347,25 @@ function App() {
         initialData={initialSaveData}
       />
       
-      {showJumpscare && (
+      {showJumpscare ? (
           <Jumpscare onComplete={handleJumpscareComplete} />
-      )}
+      ) : null}
 
-      {isGameOver && (
+      {isGameOver ? (
           <GameOverScreen wave={wave} kills={totalKills} />
-      )}
+      ) : null}
 
-      {!isLoading && !showJumpscare && !isGameOver && (
+      {!isLoading && !showJumpscare && !isGameOver ? (
         <>
           <MainMenu 
             phase={phase}
             onStartGame={handleStartGame}
+            onStartTutorial={handleStartTutorial}
             onContinueGame={handleContinueGame}
             hasSave={hasSave}
           />
 
-          <UIOverlay 
+          <GameUI 
             phase={phase} 
             battery={battery} 
             hp={hp} 
@@ -342,6 +386,8 @@ function App() {
             isBloodMoon={isBloodMoon}
             nearestEnemyDistance={nearestEnemyDistance}
             flashlightMode={flashlightMode}
+            tutorialText={tutorialText}
+            radioMessage={radioMessage}
           />
 
           <ComputerTerminal 
@@ -357,7 +403,7 @@ function App() {
             upgrades={upgrades}
           />
 
-          {isTextureGenOpen && (
+          {isTextureGenOpen ? (
               <TextureGenerator 
                   onClose={() => setIsTextureGenOpen(false)}
                   onApplyTexture={(target, base64) => {
@@ -367,9 +413,9 @@ function App() {
                       setIsTextureGenOpen(false);
                   }}
               />
-          )}
+          ) : null}
         </>
-      )}
+      ) : null}
     </div>
   );
 }

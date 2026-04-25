@@ -6,11 +6,12 @@ import PatchNotes from './PatchNotes';
 interface MainMenuProps {
   phase: GamePhase;
   onStartGame: () => void;
+  onStartTutorial: () => void;
   onContinueGame?: () => void;
   hasSave: boolean;
 }
 
-const MainMenu = ({ phase, onStartGame, onContinueGame, hasSave }: MainMenuProps) => {
+const MainMenu = ({ phase, onStartGame, onStartTutorial, onContinueGame, hasSave }: MainMenuProps) => {
   const [showLogs, setShowLogs] = useState(false);
 
   if (phase !== GamePhase.MENU) return null;
@@ -61,6 +62,14 @@ const MainMenu = ({ phase, onStartGame, onContinueGame, hasSave }: MainMenuProps
                 >
                     <span className="relative z-10">{hasSave ? 'Новая Игра' : 'Начать смену'}</span>
                     <div className="absolute inset-0 bg-green-600/0 blur-lg group-hover:bg-green-600/20 transition-all"></div>
+                </button>
+
+                <button 
+                    onClick={onStartTutorial}
+                    className="group relative w-64 px-8 py-3 bg-transparent border-2 border-gray-600 text-gray-400 font-bold uppercase tracking-widest hover:border-yellow-600 hover:text-white transition-all duration-300"
+                >
+                    <span className="relative z-10">Обучение</span>
+                    <div className="absolute inset-0 bg-yellow-600/0 blur-lg group-hover:bg-yellow-600/20 transition-all"></div>
                 </button>
 
                 <button 

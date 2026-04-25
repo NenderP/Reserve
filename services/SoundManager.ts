@@ -10,10 +10,10 @@ export class SoundManager {
   
   // Active Sound References
   private generatorHum: THREE.PositionalAudio | null = null;
+  private generatorAlarm: THREE.PositionalAudio | null = null;
   private flashlightWhine: THREE.Audio | null = null;
   private rainAmbience: THREE.Audio | null = null;
   private breathingSound: THREE.Audio | null = null;
-  private heartbeatSound: THREE.Audio | null = null;
   
   // Interactables
   private fanSound: THREE.PositionalAudio | null = null;
@@ -55,6 +55,13 @@ export class SoundManager {
           return (Math.sin(t * 100 * Math.PI * 2) * 0.6 + 
                   Math.sin(t * 115 * Math.PI * 2) * 0.2 + 
                   (Math.random() - 0.5) * 0.05) * 0.3;
+      }));
+
+      // Generator Alarm
+      this.buffers.set('gen_alarm', createBuffer(1.0, (t) => {
+          const freq = 800;
+          const pulse = Math.sin(t * Math.PI * 4) > 0 ? 1 : 0;
+          return Math.sin(t * Math.PI * 2 * freq) * pulse * 0.2;
       }));
 
       // 2. Flashlight Click
@@ -100,13 +107,6 @@ export class SoundManager {
           return noise * (phase * 0.5 + 0.5) * 0.5;
       }));
 
-      // 8.5 Heartbeat
-      this.buffers.set('heartbeat', createBuffer(1.0, (t) => {
-          const thump1 = Math.exp(-t * 20) * Math.sin(t * 40 * Math.PI);
-          const thump2 = t > 0.3 ? Math.exp(-(t - 0.3) * 20) * Math.sin((t - 0.3) * 40 * Math.PI) : 0;
-          return (thump1 + thump2) * 0.8;
-      }));
-
       // 9. Hit Marker (Sharp tick)
       this.buffers.set('hit_marker', createBuffer(0.05, (t) => {
           return (Math.random() - 0.5) * Math.exp(-t * 200) * 0.5;
@@ -131,6 +131,13 @@ export class SoundManager {
           // Occasional beep
           const beep = Math.sin(t * 2000 * Math.PI) * (Math.sin(t * 10) > 0.95 ? 0.2 : 0);
           return noise + beep;
+      }));
+
+      // 12. Footstep
+      this.buffers.set('footstep', createBuffer(0.15, (t) => {
+          const noise = (Math.random() - 0.5);
+          const env = Math.exp(-t * 20);
+          return noise * env * 0.3;
       }));
 
       // Enemy sounds...
@@ -184,6 +191,33 @@ export class SoundManager {
       this.generatorHum.setVolume(0.025); 
       mesh.add(this.generatorHum);
       this.generatorHum.play();
+
+      this.generatorAlarm = new THREE.PositionalAudio(this.listener);
+      this.generatorAlarm.setBuffer(this.buffers.get('gen_alarm')!);
+      this.generatorAlarm.setRefDistance(5);
+      this.generatorAlarm.setMaxDistance(20);
+      this.generatorAlarm.setLoop(true);
+      this.generatorAlarm.setVolume(0); 
+      mesh.add(this.generatorAlarm);
+      this.generatorAlarm.play();
+  }
+
+  public updateGeneratorSound(hpRatio: number, isDisabled: boolean) {
+      if (!this.generatorHum || !this.generatorAlarm) return;
+      
+      if (isDisabled) {
+          this.generatorHum.setVolume(0);
+          this.generatorAlarm.setVolume(0.1);
+      } else {
+          this.generatorHum.setVolume(0.025 + (1 - hpRatio) * 0.05);
+          this.generatorHum.setPlaybackRate(0.5 + hpRatio * 0.5);
+          
+          if (hpRatio < 0.3) {
+              this.generatorAlarm.setVolume(0.05);
+          } else {
+              this.generatorAlarm.setVolume(0);
+          }
+      }
   }
 
   public setupInteractableSound(mesh: THREE.Object3D, type: 'fan' | 'radio'): THREE.PositionalAudio | null {
@@ -223,28 +257,7 @@ export class SoundManager {
   }
 
   public updateHeartbeat(stress: number) {
-      if (!this.isAudioResumed) return;
-      if (!this.heartbeatSound) {
-          this.heartbeatSound = new THREE.Audio(this.listener);
-          this.heartbeatSound.setBuffer(this.buffers.get('heartbeat')!);
-          this.heartbeatSound.setLoop(true);
-          this.heartbeatSound.setVolume(0);
-          this.heartbeatSound.play();
-      }
-      
-      if (stress > 0.3) {
-          const factor = (stress - 0.3) / 0.7; // 0 to 1
-          const targetVol = factor * 1.0;
-          const current = this.heartbeatSound.getVolume();
-          this.heartbeatSound.setVolume(current + (targetVol - current) * 0.1);
-          
-          const targetRate = 1.0 + factor * 0.5;
-          const currentRate = this.heartbeatSound.playbackRate;
-          this.heartbeatSound.setPlaybackRate(currentRate + (targetRate - currentRate) * 0.1);
-      } else {
-          const current = this.heartbeatSound.getVolume();
-          this.heartbeatSound.setVolume(current * 0.9);
-      }
+      // Logic removed
   }
 
   // FIX: Add overcharge sound player
@@ -306,6 +319,15 @@ export class SoundManager {
       const sound = new THREE.Audio(this.listener);
       sound.setBuffer(this.buffers.get('hit_marker')!);
       sound.setVolume(0.8);
+      sound.play();
+  }
+
+  public playFootstep() {
+      if (!this.buffers.has('footstep')) return;
+      const sound = new THREE.Audio(this.listener);
+      sound.setBuffer(this.buffers.get('footstep')!);
+      sound.setVolume(0.1 + Math.random() * 0.05);
+      sound.setPlaybackRate(0.8 + Math.random() * 0.4);
       sound.play();
   }
 
@@ -407,6 +429,41 @@ export class SoundManager {
       setTimeout(() => {
           if (sound.parent) sound.parent.remove(sound);
       }, 500); 
+  }
+
+  public playTeslaZap(scene: THREE.Scene, pos: THREE.Vector3) {
+      if (!this.buffers.has('hit')) return; // reuse hit or create new
+      const sound = new THREE.PositionalAudio(this.listener);
+      sound.setBuffer(this.buffers.get('hit')!);
+      sound.setRefDistance(10);
+      sound.setVolume(0.8);
+      sound.setPlaybackRate(2.0 + Math.random()); // high pitch zap
+      sound.position.copy(pos);
+      scene.add(sound);
+      sound.play();
+      setTimeout(() => { if (sound.parent) sound.parent.remove(sound); }, 500);
+  }
+
+  public playSpitSound(scene: THREE.Scene, pos: THREE.Vector3) {
+      if (!this.buffers.has('dash')) return; // reuse dash
+      const sound = new THREE.PositionalAudio(this.listener);
+      sound.setBuffer(this.buffers.get('dash')!);
+      sound.setRefDistance(15);
+      sound.setVolume(0.6);
+      sound.setPlaybackRate(0.5 + Math.random() * 0.2); // low pitch whoosh
+      sound.position.copy(pos);
+      scene.add(sound);
+      sound.play();
+      setTimeout(() => { if (sound.parent) sound.parent.remove(sound); }, 1000);
+  }
+
+  public playHallucinationVanish() {
+      if (!this.buffers.has('screamer')) return;
+      const sound = new THREE.Audio(this.listener);
+      sound.setBuffer(this.buffers.get('screamer')!);
+      sound.setVolume(0.2);
+      sound.setPlaybackRate(1.5);
+      sound.play();
   }
 
   public playBirdSound(scene: THREE.Scene, playerPos: THREE.Vector3) {

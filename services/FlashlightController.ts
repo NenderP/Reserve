@@ -41,6 +41,7 @@ export class FlashlightController {
   private readonly OVERCHARGE_DURATION_TIME = 0.5; // Increased duration for better visibility
 
   private currentMode: FlashlightMode = FlashlightMode.NORMAL;
+  private unlockedModes: FlashlightMode[] = [FlashlightMode.NORMAL];
   private strobeTimer: number = 0;
   private strobeState: boolean = true;
 
@@ -108,16 +109,16 @@ export class FlashlightController {
     this.mesh.add(flGroup);
 
     // --- 2. The Light Source ---
-    this.spotLight = new THREE.SpotLight(COLORS.LIGHT, 300);
+    this.spotLight = new THREE.SpotLight(COLORS.LIGHT, 100);
     this.spotLight.angle = Math.PI / 6;
-    this.spotLight.penumbra = 0.3; // Sharper edge for horror feel
-    this.spotLight.decay = 1.5;
+    this.spotLight.penumbra = 0.4; // Softer edge
+    this.spotLight.decay = 1.0; // Linear decay to prevent blowout up close
     this.spotLight.distance = 60; // Optimized distance
     this.spotLight.castShadow = true;
     
     // Optimized Shadow Map
-    this.spotLight.shadow.mapSize.width = 1024; // Optimized for performance
-    this.spotLight.shadow.mapSize.height = 1024;
+    this.spotLight.shadow.mapSize.width = 512; // Optimized for performance
+    this.spotLight.shadow.mapSize.height = 512;
     this.spotLight.shadow.bias = -0.00001; // Very tight bias for spotlight
     this.spotLight.shadow.radius = 2; // Slight blur
     this.spotLight.shadow.camera.near = 0.5;
@@ -139,7 +140,7 @@ export class FlashlightController {
       uniforms: {
         color: { value: new THREE.Color(COLORS.LIGHT) },
         attenuation: { value: 25.0 },
-        opacity: { value: 0.15 }
+        opacity: { value: 0.08 }
       },
       vertexShader: `
         varying float vDist;
@@ -225,7 +226,7 @@ export class FlashlightController {
           transparent: true,
           blending: THREE.AdditiveBlending,
           depthTest: false,
-          opacity: 0.8
+          opacity: 0.4
       });
       
       this.haloSprite = new THREE.Sprite(material);
@@ -235,7 +236,7 @@ export class FlashlightController {
   }
 
   private createDust() {
-    const particleCount = 100; // Reduced from 300
+    const particleCount = 50; // Heavily reduced from 100 for optimization
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     this.dustVelocities = new Float32Array(particleCount);
@@ -281,22 +282,29 @@ export class FlashlightController {
       return this.currentMode;
   }
 
+  public unlockMode(mode: FlashlightMode) {
+      if (!this.unlockedModes.includes(mode)) {
+          this.unlockedModes.push(mode);
+      }
+  }
+
   public cycleMode() {
+      const currentIndex = this.unlockedModes.indexOf(this.currentMode);
+      const nextIndex = (currentIndex + 1) % this.unlockedModes.length;
+      this.currentMode = this.unlockedModes[nextIndex];
+      
       if (this.currentMode === FlashlightMode.NORMAL) {
-          this.currentMode = FlashlightMode.UV;
-          this.spotLight.color.setHex(0x8a2be2); // Purple UV
-          this.spotLight.angle = Math.PI / 4; // Wider angle
-          this.spotLight.distance = 20; // Shorter distance
-      } else if (this.currentMode === FlashlightMode.UV) {
-          this.currentMode = FlashlightMode.STROBE;
-          this.spotLight.color.setHex(0xffffff); // White Strobe
-          this.spotLight.angle = Math.PI / 6; // Normal angle
-          this.spotLight.distance = 40; // Normal distance
-      } else {
-          this.currentMode = FlashlightMode.NORMAL;
           this.spotLight.color.setHex(0xffffee); // Warm White
           this.spotLight.angle = Math.PI / 6;
           this.spotLight.distance = 40;
+      } else if (this.currentMode === FlashlightMode.UV) {
+          this.spotLight.color.setHex(0x8a2be2); // Purple UV
+          this.spotLight.angle = Math.PI / 4; // Wider angle
+          this.spotLight.distance = 20; // Shorter distance
+      } else if (this.currentMode === FlashlightMode.STROBE) {
+          this.spotLight.color.setHex(0xffffff); // White Strobe
+          this.spotLight.angle = Math.PI / 6; // Normal angle
+          this.spotLight.distance = 40; // Normal distance
       }
       
       // Reset strobe state
@@ -375,7 +383,7 @@ export class FlashlightController {
 
     if (this.isOn && !this.isDisabled) {
       if (this.isCurrentlyOvercharging) {
-          this.spotLight.intensity = 1500;
+          this.spotLight.intensity = 500;
           this.volumetricCone.visible = true;
           this.haloSprite.visible = true;
           this.dustSystem.visible = true;
@@ -386,16 +394,22 @@ export class FlashlightController {
         
         this.battery -= drainRate * delta;
         
-        let currentIntensity = 300;
+        let currentIntensity = 100;
         if (this.battery < 20) {
           this.flickerTimer += delta;
           if (this.flickerTimer > Math.random() * 0.2 + 0.05) {
-              currentIntensity = Math.random() > 0.5 ? 0 : 300;
+              currentIntensity = Math.random() > 0.5 ? 0 : 100;
               this.flickerTimer = 0;
           }
         } 
         
         this.spotLight.intensity = currentIntensity;
+        if (this.flickerTimer > 0) {
+            this.flickerTimer -= delta;
+            currentIntensity = (Math.random() > 0.5) ? 0 : currentIntensity;
+            this.spotLight.intensity = currentIntensity;
+        }
+
         const isVis = currentIntensity > 10;
         this.volumetricCone.visible = isVis;
         this.haloSprite.visible = isVis;
@@ -428,7 +442,7 @@ export class FlashlightController {
     }
 
     if (isRefilling) {
-        this.battery += GAME_CONFIG.BATTERY_RECHARGE_RATE * delta;
+        this.battery += GAME_CONFIG.BATTERY_RECHARGE_RATE * delta * 2.0; // Faster recharge
     }
 
     this.battery = Math.min(Math.max(this.battery, 0), GAME_CONFIG.MAX_BATTERY);
@@ -564,5 +578,9 @@ export class FlashlightController {
   
   public isLightOn(): boolean {
       return this.isOn && !this.isDisabled;
+  }
+
+  public flicker(duration: number) {
+      this.flickerTimer = duration;
   }
 }
